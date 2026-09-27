@@ -1,0 +1,34 @@
+{
+  "id": "default",
+  "gameTitle": "Default Compatibility Profile",
+  "graphicsApi": "DirectX 12",
+  "runtimeRecommendation": "Wine 9.0+ / GPTK",
+  "vkd3dConfig": [
+    "shader_cache"
+  ],
+  "dxvkConfig": {},
+  "environment": {
+    "VKD3D_CONFIG": "shader_cache",
+    "WINEESYNC": "1",
+    "WINEFSYNC": "1"
+  },
+  "dllOverrides": {
+    "d3d12": "native,builtin",
+    "dxgi": "native,builtin",
+    "d3d11": "native,builtin"
+  },
+  "launchArguments": [],
+  "dependencies": [
+    "vcrun2022"
+  ],
+  "knownIssues": [
+    "Kernel-level anti-cheat engines (Vanguard, EAC, BattlEye kernel mode) will not launch in user-space Wine translation."
+  ],
+  "recommendedSettings": {
+    "Shader Cache": "Enabled",
+    "Resolution": "1920x1080 or Native Display"
+  },
+  "version": 1,
+  "author": "MacGame System",
+  "notes": "Safe default profile for unrecognized or newly installed games."
+}

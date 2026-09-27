@@ -1,0 +1,19 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Xcode / Swift Package Manager
+.build/
+Packages/
+Package.pins
+Package.resolved
+xcuserdata/
+DerivedData/
+.swiftpm/
+
+# User Application Data & Logs
+*.log
+*.tar
+*.zip
+cache/

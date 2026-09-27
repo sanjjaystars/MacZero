@@ -1,0 +1,33 @@
+{
+  "id": "elden-ring",
+  "gameTitle": "Elden Ring",
+  "graphicsApi": "DirectX 12",
+  "runtimeRecommendation": "Wine 9.0+ / VKD3D-Proton",
+  "vkd3dConfig": [
+    "shader_cache"
+  ],
+  "dxvkConfig": {},
+  "environment": {
+    "VKD3D_CONFIG": "shader_cache",
+    "WINEESYNC": "1",
+    "WINEFSYNC": "1"
+  },
+  "dllOverrides": {
+    "d3d12": "native,builtin",
+    "dxgi": "native,builtin"
+  },
+  "launchArguments": [],
+  "dependencies": [
+    "vcrun2022"
+  ],
+  "knownIssues": [
+    "Easy Anti-Cheat requires offline launch switch or EAC bypass for offline solo play."
+  ],
+  "recommendedSettings": {
+    "Framerate": "60 FPS (capped by engine)",
+    "Quality Preset": "High (M2 Pro/M3/M4)"
+  },
+  "version": 1,
+  "author": "MacGame Compatibility Team",
+  "notes": "DirectX 12 FromSoftware engine."
+}
