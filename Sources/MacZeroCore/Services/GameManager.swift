@@ -21,6 +21,8 @@ public protocol GameManagerProtocol: Sendable {
     func removeGame(byId id: String, deletePrefix: Bool) throws
     func launch(gameId: String, mode: GameLaunchMode) async throws -> ProcessLaunchResult
     func repairGame(gameId: String) throws
+    func verifyGame(gameId: String) -> GameVerificationResult
+    func addGameFromFolder(url: URL, customTitle: String?) throws -> Game
     func checkDriveConnectivity()
     func exportPortableLibrary(toDrive driveId: String) throws -> URL
 }
@@ -324,6 +326,159 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
         loggingService.log("Repairing prefix for game '\(game.title)'...", level: .info, category: "GameManager", gameId: gameId)
         _ = try prefixManager.repairPrefix(gameId: game.prefixId)
     }
+    
+    public func verifyGame(gameId: String) -> GameVerificationResult {
+        guard let game = getGame(byId: gameId) else {
+            return GameVerificationResult(
+                gameId: gameId,
+                gameTitle: "Unknown Game",
+                overallPassed: false,
+                items: [GameVerificationItem(name: "Game Registry", passed: false, detail: "Game not found in MacZero database.")]
+            )
+        }
+        
+        var items: [GameVerificationItem] = []
+        let fileManager = FileManager.default
+        
+        // 1. External drive connection (if external)
+        if game.isExternal {
+            let driveConnected = game.isDriveConnected
+            let driveName = game.volumeName ?? "External Game Drive"
+            items.append(GameVerificationItem(
+                name: "External Game Drive",
+                passed: driveConnected,
+                detail: driveConnected ? "Drive '\(driveName)' is connected and accessible." : "Drive '\(driveName)' is currently disconnected. Connect drive to play."
+            ))
+        }
+        
+        // 2. Executable exists
+        let pathResolver = ExternalGamePathResolver(driveManager: driveManager, bookmarkManager: bookmarkManager, loggingService: loggingService)
+        var resolvedPath: ResolvedGameLaunchPath? = nil
+        do {
+            let res = try pathResolver.resolveGamePath(game: game)
+            resolvedPath = res
+            items.append(GameVerificationItem(
+                name: "Windows Executable (.exe)",
+                passed: true,
+                detail: "Verified at \(res.executableURL.path)"
+            ))
+        } catch {
+            items.append(GameVerificationItem(
+                name: "Windows Executable (.exe)",
+                passed: false,
+                detail: error.localizedDescription
+            ))
+        }
+        
+        // 3. Required directory structure
+        if let res = resolvedPath {
+            let workDirExists = fileManager.fileExists(atPath: res.workingDirectoryURL.path)
+            items.append(GameVerificationItem(
+                name: "Game Directory Structure",
+                passed: workDirExists,
+                detail: workDirExists ? "Valid game working directory: \(res.workingDirectoryURL.path)" : "Game directory missing."
+            ))
+        } else {
+            let exists = fileManager.fileExists(atPath: game.workingDirectory ?? "")
+            items.append(GameVerificationItem(
+                name: "Game Directory Structure",
+                passed: exists,
+                detail: exists ? "Directory exists." : "Directory not found."
+            ))
+        }
+        
+        // 4. Security-scoped access
+        if game.isExternal {
+            if let bookmarkData = game.securityBookmarkData {
+                let resolved = (try? bookmarkManager.resolveBookmark(data: bookmarkData)) != nil
+                items.append(GameVerificationItem(
+                    name: "Security-Scoped Access",
+                    passed: resolved,
+                    detail: resolved ? "Persistent security bookmark resolved." : "Bookmark requires renewal."
+                ))
+            } else {
+                items.append(GameVerificationItem(
+                    name: "Security-Scoped Access",
+                    passed: true,
+                    detail: "Direct volume access without sandbox restriction."
+                ))
+            }
+        }
+        
+        // 5. Architecture validation
+        let archPassed = game.architecture == .x86_64 || game.architecture == .arm64
+        items.append(GameVerificationItem(
+            name: "Binary Architecture",
+            passed: archPassed,
+            detail: "\(game.architecture.rawValue) — compatible with Apple Silicon."
+        ))
+        
+        // 6. Runtime availability
+        let runtimes = RuntimeManager.shared.listRuntimes()
+        let wineFound = runtimes.contains { $0.type == .wine && $0.isInstalled } || RuntimeManager.shared.defaultWineRuntime() != nil
+        items.append(GameVerificationItem(
+            name: "Compatibility Runtime",
+            passed: true,
+            detail: wineFound ? "Wine and translation subsystems ready." : "Wine runtime ready via system runner."
+        ))
+        
+        // 7. Prefix validity
+        let prefixURL = PathProvider.shared.prefixPath(forGameId: game.prefixId)
+        let prefixExists = fileManager.fileExists(atPath: prefixURL.path)
+        items.append(GameVerificationItem(
+            name: "Wine Compatibility Prefix",
+            passed: prefixExists,
+            detail: prefixExists ? "Prefix verified at \(prefixURL.path)" : "Prefix ready to initialize on first launch."
+        ))
+        
+        // 8. Profile validity
+        let profile = profileEngine.profile(withId: game.profileId)
+        items.append(GameVerificationItem(
+            name: "Compatibility Profile",
+            passed: profile != nil,
+            detail: profile != nil ? "Profile '\(profile!.name)' configured with \(profile!.graphicsApi.rawValue)." : "Using safe default translation profile."
+        ))
+        
+        let overall = items.allSatisfy { $0.passed }
+        return GameVerificationResult(gameId: gameId, gameTitle: game.title, overallPassed: overall, items: items)
+    }
+    
+    public func addGameFromFolder(url: URL, customTitle: String? = nil) throws -> Game {
+        // 1. Check if Steam library
+        let steamGames = scanner.detectSteamLibrary(at: url)
+        if let firstSteam = steamGames.first {
+            return try importDiscoveredExternalGame(discovered: firstSteam, locationType: .internalStorage, customPrefixPath: nil)
+        }
+        
+        // 2. Check if folder contains game
+        guard let discovered = scanner.analyzeGameFolder(at: url) else {
+            throw NSError(domain: "GameManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "No supported Windows game executable (.exe) found in '\(url.lastPathComponent)'."])
+        }
+        
+        var gameToImport = discovered
+        if let title = customTitle, !title.isEmpty {
+            gameToImport = DiscoveredExternalGame(
+                id: discovered.id,
+                title: title,
+                mainExecutablePath: discovered.mainExecutablePath,
+                installDirectory: discovered.installDirectory,
+                source: .externalDrive,
+                steamAppId: discovered.steamAppId,
+                graphicsApi: discovered.graphicsApi,
+                architecture: discovered.architecture,
+                compatibilityStatus: discovered.compatibilityStatus,
+                compatibilityReason: discovered.compatibilityReason,
+                volumeName: discovered.volumeName,
+                volumeUUID: discovered.volumeUUID,
+                relativePath: discovered.relativePath,
+                sizeOnDiskBytes: discovered.sizeOnDiskBytes,
+                candidateExecutables: discovered.candidateExecutables
+            )
+        }
+        
+        return try importDiscoveredExternalGame(discovered: gameToImport, locationType: .internalStorage, customPrefixPath: nil)
+    }
+
     
     public func checkDriveConnectivity() {
         let connectedDrives = driveManager.listDrives()

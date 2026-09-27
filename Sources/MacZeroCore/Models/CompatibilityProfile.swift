@@ -17,6 +17,8 @@ public struct CompatibilityProfile: Identifiable, Codable, Equatable, Sendable {
     public var author: String
     public var notes: String?
     
+    public var name: String { gameTitle }
+    
     public init(
         id: String,
         gameTitle: String,

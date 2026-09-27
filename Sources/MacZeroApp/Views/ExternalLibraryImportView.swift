@@ -185,13 +185,13 @@ struct ExternalLibraryImportView: View {
             HStack {
                 Spacer()
                 if vm.selectedTab == 0 {
-                    Button("Import Selected (\(vm.selectedSteamAppIds.count))") {
+                    Button("Add Selected Games (\(vm.selectedSteamAppIds.count))") {
                         importSteamGames()
                     }
                     .buttonStyle(.borderedProminent)
                     .disabled(vm.selectedSteamAppIds.isEmpty)
                 } else {
-                    Button("Import Game") {
+                    Button("Add to Library") {
                         importFolderGame()
                     }
                     .buttonStyle(.borderedProminent)
@@ -202,6 +202,14 @@ struct ExternalLibraryImportView: View {
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .frame(width: 620, height: 560)
+        .onAppear {
+            if let dropped = viewModel.droppedFolderURL {
+                vm.selectedTab = 1
+                vm.gameFolderPath = dropped.path
+                vm.analyzeGameFolder(url: dropped)
+                viewModel.droppedFolderURL = nil
+            }
+        }
     }
     
     // MARK: - Steam Library View

@@ -126,6 +126,33 @@ struct GameDetailView: View {
                     .buttonStyle(.plain)
                     .disabled(viewModel.isLaunching || (game.isExternal && !game.isDriveConnected))
                     
+                    Button(action: { viewModel.verifySelectedGame() }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.shield")
+                            Text("Verify Files")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+                    
+                    Button(action: {
+                        let folderPath = game.workingDirectory ?? (game.executablePath as NSString).deletingLastPathComponent
+                        NSWorkspace.shared.selectFile(game.executablePath, inFileViewerRootedAtPath: folderPath)
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder")
+                            Text("Open Game Folder")
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .cornerRadius(8)
+                    }
+                    .buttonStyle(.plain)
+
                     Menu {
                         Button("Launch in Safe Mode") {
                             viewModel.launchSelectedGame(mode: .safeMode)
@@ -153,9 +180,9 @@ struct GameDetailView: View {
                     } label: {
                         HStack {
                             Image(systemName: "ellipsis.circle")
-                            Text("Options")
+                            Text("More")
                         }
-                        .padding(.horizontal, 14)
+                        .padding(.horizontal, 12)
                         .padding(.vertical, 10)
                         .background(Color(nsColor: .controlBackgroundColor))
                         .cornerRadius(8)
@@ -166,7 +193,7 @@ struct GameDetailView: View {
                     Button(action: { viewModel.showDiagnosticsSheet = true }) {
                         HStack(spacing: 6) {
                             Image(systemName: "waveform.path.ecg")
-                            Text("Diagnostics")
+                            Text("Diagnose")
                         }
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)

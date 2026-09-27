@@ -1,20 +1,21 @@
 # MacZero
 
-> **"Play your Windows games on Mac."**
+> **"Your Windows game files stay where they are. MacZero makes them playable on your Mac."**
 
-MacZero is a graphical compatibility platform, game manager, and translation runtime manager engineered specifically for Apple Silicon Macs (M1, M2, M3, M4, and M5). It automates the complex configuration of Wine prefixes, DirectX translation layers, dynamic libraries, and graphics pipelines to deliver a seamless:
+### "PLUG GAME DRIVE → OPEN MACZERO → PLAY"
 
-**Install Windows game → Configure automatically → Click Play** experience.
+MacZero is a zero-installation portable Windows game compatibility runner engineered specifically for Apple Silicon Macs (M1, M2, M3, M4, and M5). It allows you to take any Windows game existing on an external SSD, HDD, or USB flash drive and run it directly without installing Windows, without copying game assets to your Mac's internal storage, and without touching Wine prefixes, VKD3D configurations, MoltenVK settings, or Terminal commands.
 
 ---
 
-## Key Features
+## The Zero-Installation Principle
 
-- **External Game Drive & Direct Storage Play**: Run games directly from USB flash drives, external HDDs, and external SSDs (e.g. `/Volumes/GamesSSD/`) without copying hundreds of gigabytes of game assets to internal storage.
-- **Existing Steam Library Support**: Automatically detects and imports games from existing external Steam libraries (`SteamLibrary/steamapps/common/`), parsing `appmanifest_*.acf` files to extract titles, AppIDs, and executables.
-- **Persistent Security-Scoped Bookmarks**: Uses native macOS security-scoped bookmarks to retain persistent read/write access to external drives and game directories across application restarts.
-- **Drive Hot-Plugging & Disconnection Recovery**: Gracefully handles external drive disconnects without deleting games from your library; automatically re-attaches games with stable volume UUIDs when reconnected.
-- **Game Files vs Compatibility Prefix Isolation**: Game installations remain untouched on external storage, while Wine prefixes default to internal storage (`~/Library/Application Support/MacZero/prefixes/<game-id>`) with user-configurable external storage options.
+1. **Keep Your Games External**: Keep 100 GB+ games (like *Mortal Kombat 1*, *Cyberpunk 2077*, etc.) on your external SSD or USB flash drive. MacZero never copies or duplicates game assets to your Mac's internal drive.
+2. **Instant Drive Discovery**: Plug in any external drive or USB flash drive (`/Volumes/GamesSSD/`). MacZero automatically monitors mounted volumes and discovers games.
+3. **One-Click Drag & Drop**: Simply drag any Windows game folder or `.exe` onto the MacZero window. MacZero analyzes the PE binary headers, identifies the primary game executable, and makes it playable instantly.
+4. **8-Point Game Integrity Verification**: Built-in verification checks external drive connectivity, executable structure, security bookmarks, binary architecture, compatibility runtimes, Wine prefixes, and profiles.
+5. **Isolated Compatibility Environments**: Each game gets its own isolated Wine prefix located safely on internal SSD (`~/Library/Application Support/MacZero/prefixes/<game-id>`) while the game files remain on the external volume.
+6. **No "Install" Step**: There is no installation process. You simply **Add Game** or **Scan Drive**, click **PLAY**, and enjoy your game immediately.
 - **External Drive Manager & Speed Benchmark**: Inspects volume capacity, filesystem types (APFS, exFAT, NTFS), read-only warnings, and includes an optional sequential read/write speed test.
 - **Portable MacZero Library**: Option to export configuration and profiles directly onto external drives (`/Volumes/.../MacZero/`).
 - **DirectX 12 Focused Translation Pipeline**: Maps DirectX 12 calls via **VKD3D-Proton** → **Vulkan** → **MoltenVK** → **Metal 3** directly onto the Apple Silicon unified GPU.

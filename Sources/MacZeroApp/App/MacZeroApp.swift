@@ -23,38 +23,127 @@ struct MacZeroApp: App {
                     .frame(minWidth: 200, idealWidth: 220)
             } content: {
                 VStack(spacing: 0) {
-                    // Header Bar
+                    // Header Bar with Quick Filters
                     HStack {
-                        Text(viewModel.filterCategory.rawValue)
-                            .font(.system(size: 20, weight: .bold))
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(viewModel.filterCategory.rawValue)
+                                .font(.system(size: 20, weight: .bold))
+                            
+                            // Section 28 Quick Filter Pills: [ All ] [ External ] [ Steam ] [ Ready ]
+                            HStack(spacing: 6) {
+                                QuickFilterButton(title: "All", isSelected: viewModel.filterCategory == .allGames) {
+                                    viewModel.filterCategory = .allGames
+                                }
+                                QuickFilterButton(title: "External", isSelected: viewModel.filterCategory == .externalGames) {
+                                    viewModel.filterCategory = .externalGames
+                                }
+                                QuickFilterButton(title: "Steam", isSelected: viewModel.filterCategory == .steamGames) {
+                                    viewModel.filterCategory = .steamGames
+                                }
+                                QuickFilterButton(title: "Ready", isSelected: viewModel.filterCategory == .readyGames) {
+                                    viewModel.filterCategory = .readyGames
+                                }
+                            }
+                        }
+                        
                         Spacer()
-                        Text("\(viewModel.filteredGames.count) game(s)")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
+                        
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("\(viewModel.filteredGames.count) game(s)")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                            
+                            Button(action: { viewModel.showExternalImportSheet = true }) {
+                                Label("Scan Drive", systemImage: "magnifyingglass")
+                                    .font(.system(size: 11, weight: .semibold))
+                            }
+                            .buttonStyle(.bordered)
+                        }
                     }
                     .padding(.horizontal)
                     .padding(.top, 14)
                     .padding(.bottom, 8)
                     
+                    // Connected Drives Strip
+                    if !viewModel.drives.isEmpty {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                Text("CONNECTED DRIVES:")
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.secondary)
+                                
+                                ForEach(viewModel.drives) { drive in
+                                    HStack(spacing: 5) {
+                                        Circle()
+                                            .fill(drive.isConnected ? Color.green : Color.gray)
+                                            .frame(width: 7, height: 7)
+                                        Text(drive.name)
+                                            .font(.system(size: 11, weight: .semibold))
+                                        
+                                        if drive.isConnected {
+                                            Button("Scan") {
+                                                viewModel.quickScanDrive(drive: drive)
+                                            }
+                                            .buttonStyle(.borderless)
+                                            .font(.system(size: 10, weight: .bold))
+                                            .foregroundColor(.accentColor)
+                                        }
+                                    }
+                                    .padding(.horizontal, 8)
+                                    .padding(.vertical, 3)
+                                    .background(Color(nsColor: .controlBackgroundColor))
+                                    .cornerRadius(6)
+                                }
+                            }
+                            .padding(.horizontal)
+                            .padding(.vertical, 4)
+                        }
+                        Divider()
+                    }
+                    
+                    if let scanMsg = viewModel.scanDriveMessage {
+                        HStack {
+                            Text(scanMsg)
+                                .font(.system(size: 11))
+                                .foregroundColor(.accentColor)
+                            Spacer()
+                            Button("Dismiss") {
+                                viewModel.scanDriveMessage = nil
+                            }
+                            .buttonStyle(.borderless)
+                            .font(.system(size: 10))
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 4)
+                        .background(Color.accentColor.opacity(0.1))
+                    }
+                    
                     // Game Library Grid
                     if viewModel.filteredGames.isEmpty {
-                        VStack(spacing: 12) {
+                        VStack(spacing: 14) {
                             Image(systemName: "gamecontroller")
-                                .font(.system(size: 40))
+                                .font(.system(size: 42))
                                 .foregroundColor(.secondary)
                             Text("No Games in this Category")
-                                .font(.system(size: 15, weight: .semibold))
-                            Text("Click '+ Add Game' in the toolbar to install a Windows game or scan your Steam library.")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("Connect your game drive or drag and drop any Windows game folder or .exe here to play instantly without installation.")
                                 .font(.system(size: 12))
                                 .foregroundColor(.secondary)
                                 .multilineTextAlignment(.center)
                                 .padding(.horizontal, 40)
                             
-                            Button("+ Add Game") {
-                                viewModel.showAddGameWizard = true
+                            HStack(spacing: 12) {
+                                Button("+ Add Game") {
+                                    viewModel.showAddGameWizard = true
+                                }
+                                .buttonStyle(.borderedProminent)
+                                
+                                Button("Scan Game Drive") {
+                                    viewModel.showExternalImportSheet = true
+                                }
+                                .buttonStyle(.bordered)
                             }
-                            .buttonStyle(.borderedProminent)
-                            .padding(.top, 8)
+                            .padding(.top, 4)
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
@@ -146,6 +235,21 @@ struct MacZeroApp: App {
             .sheet(isPresented: $viewModel.showLogsSheet) {
                 LogViewerSheet(targetGameId: viewModel.selectedGameId)
             }
+            .sheet(isPresented: $viewModel.showVerificationSheet) {
+                GameVerificationSheet(result: viewModel.verificationResult)
+            }
+            .onDrop(of: ["public.file-url"], isTargeted: nil) { providers in
+                for provider in providers {
+                    _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                        if let url = url {
+                            DispatchQueue.main.async {
+                                viewModel.handleDroppedURLs([url])
+                            }
+                        }
+                    }
+                }
+                return true
+            }
 
             .alert("Game Execution Alert", isPresented: $viewModel.showCrashAlert) {
                 Button("Try Safe Mode") {
@@ -174,3 +278,23 @@ struct MacZeroApp: App {
         }
     }
 }
+
+struct QuickFilterButton: View {
+    let title: String
+    let isSelected: Bool
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11, weight: isSelected ? .bold : .medium))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.12))
+                .foregroundColor(isSelected ? .white : .primary)
+                .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+    }
+}
+

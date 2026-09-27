@@ -30,6 +30,13 @@ struct MacZeroTestsRunner {
         runTest("Prefix Location Isolation (Game Stays External)", testPrefixLocationIsolation)
         await runAsyncTest("Acceptance Test: Mortal Kombat 1 on External SSD", testAcceptanceMortalKombat1DirectPlay)
         
+        // Zero-Installation Portable Runner Tests
+        runTest("Game Verification & 8-Point Integrity Checkup", testGameVerificationIntegrityCheck)
+        await runAsyncTest("Non-Steam Direct Windows Game on USB Drive", testNonSteamDirectGameOnUSBFlashDrive)
+        runTest("Multiple Executables Ranking (Main Game vs Helper)", testMultipleExecutablesRanking)
+        runTest("Duplicate Game Separation Across Multiple External Drives", testDuplicateGameOnMultipleExternalDrives)
+        await runAsyncTest("Disconnected Drive Graceful Handling Without Crash", testDisconnectedDriveHandlingWithoutCrash)
+        
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         if failedCount == 0 {
             print("🎉 ALL \(passedCount) TESTS PASSED SUCCESSFULLY!")
@@ -491,4 +498,164 @@ struct MacZeroTestsRunner {
         try assertTrue(internalPrefix?.path.contains("MacZeroInternal") == true, "Prefix must be stored inside Mac internal storage")
         try assertTrue(FileManager.default.fileExists(atPath: mk12Exe.path), "Original game files remain on external SSD untouched")
     }
+    
+    // MARK: - Zero-Installation Portable Runner Tests
+    
+    static func testGameVerificationIntegrityCheck() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("MacZeroVerifyTest_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        
+        let paths = PathProvider(customRoot: tempRoot)
+        let prefixMgr = PrefixManager(pathProvider: paths)
+        let processMgr = ProcessManager(pathProvider: paths, customRunnerBinary: "/usr/bin/true")
+        let gameMgr = GameManager(pathProvider: paths, prefixManager: prefixMgr, processManager: processMgr)
+        
+        let testExe = tempRoot.appendingPathComponent("Game.exe")
+        var pe = Data(count: 1024)
+        pe[0] = 0x4D; pe[1] = 0x5A; pe[0x3C] = 0x80
+        pe[0x80] = 0x50; pe[0x81] = 0x45; pe[0x84] = 0x64; pe[0x85] = 0x86
+        try pe.write(to: testExe)
+        
+        let added = try gameMgr.addGameFromExecutable(path: testExe.path, customTitle: "Integrity Test Game", source: .customExe)
+        let verification = gameMgr.verifyGame(gameId: added.id)
+        
+        try assertTrue(verification.gameId == added.id, "Verification game ID must match")
+        try assertTrue(verification.items.count >= 6, "Verification must contain all key component checks")
+        try assertTrue(verification.items.contains { $0.name == "Windows Executable (.exe)" && $0.passed }, "Executable verification must pass")
+        try assertTrue(verification.items.contains { $0.name == "Binary Architecture" && $0.passed }, "Architecture check must pass")
+    }
+    
+    static func testNonSteamDirectGameOnUSBFlashDrive() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("MacZeroUSBTest_\(UUID().uuidString)")
+        let usbDrive = tempRoot.appendingPathComponent("USBDrive/Games/TestGame")
+        try FileManager.default.createDirectory(at: usbDrive, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        
+        let gameExe = usbDrive.appendingPathComponent("Game.exe")
+        var pe = Data(count: 2048)
+        pe[0] = 0x4D; pe[1] = 0x5A; pe[0x3C] = 0x80
+        pe[0x80] = 0x50; pe[0x81] = 0x45; pe[0x84] = 0x64; pe[0x85] = 0x86
+        try pe.write(to: gameExe)
+        
+        let paths = PathProvider(customRoot: tempRoot.appendingPathComponent("InternalMacZero"))
+        let prefixMgr = PrefixManager(pathProvider: paths)
+        let processMgr = ProcessManager(pathProvider: paths, customRunnerBinary: "/usr/bin/true")
+        let gameMgr = GameManager(pathProvider: paths, prefixManager: prefixMgr, processManager: processMgr)
+        
+        // Add non-steam game directly from folder
+        let imported = try gameMgr.addGameFromFolder(url: usbDrive, customTitle: "Test USB Game")
+        try assertTrue(imported.title == "Test USB Game", "Imported non-Steam game title matches")
+        try assertTrue(imported.executablePath == gameExe.resolvingSymlinksInPath().path, "Executable remains on external USB drive")
+        try assertTrue(imported.isExternal, "Game is correctly identified as external")
+        
+        // Launch directly without copying files
+        let res = try await gameMgr.launch(gameId: imported.id, mode: .standard)
+        try assertTrue(res.exitCode == 0, "Non-Steam USB game launches directly with exit code 0")
+        try assertTrue(FileManager.default.fileExists(atPath: gameExe.path), "Game file remains on USB drive")
+    }
+    
+    static func testMultipleExecutablesRanking() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("MacZeroMultiExe_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        
+        let gameDir = tempRoot.appendingPathComponent("Cyber Adventure")
+        try FileManager.default.createDirectory(at: gameDir, withIntermediateDirectories: true)
+        
+        // Create 4 executables: main game, launcher, uninstaller, crash handler
+        let mainGameExe = gameDir.appendingPathComponent("CyberAdventure.exe")
+        let launcherExe = gameDir.appendingPathComponent("Launcher.exe")
+        let uninsExe = gameDir.appendingPathComponent("unins000.exe")
+        let crashExe = gameDir.appendingPathComponent("CrashReport.exe")
+        
+        func createExe(at url: URL, size: Int) throws {
+            var data = Data(count: size)
+            data[0] = 0x4D; data[1] = 0x5A; data[0x3C] = 0x80
+            data[0x80] = 0x50; data[0x81] = 0x45; data[0x84] = 0x64; data[0x85] = 0x86
+            try data.write(to: url)
+        }
+        
+        try createExe(at: mainGameExe, size: 4096)
+        try createExe(at: launcherExe, size: 1024)
+        try createExe(at: uninsExe, size: 1024)
+        try createExe(at: crashExe, size: 1024)
+        
+        let scanner = GameFolderScanner.shared
+        guard let analyzed = scanner.analyzeGameFolder(at: gameDir) else {
+            throw NSError(domain: "TestFailed", code: 1, userInfo: [NSLocalizedDescriptionKey: "Failed to analyze game folder with multiple executables"])
+        }
+        
+        try assertTrue(analyzed.mainExecutablePath == mainGameExe.resolvingSymlinksInPath().path, "Main executable must be ranked above helpers/launchers")
+        try assertTrue(!analyzed.candidateExecutables.contains { $0.contains("unins000") }, "Uninstaller stub must be filtered out")
+    }
+    
+    static func testDuplicateGameOnMultipleExternalDrives() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("MacZeroDuplicates_\(UUID().uuidString)")
+        let drive1 = tempRoot.appendingPathComponent("SSD1/Games/Mortal Kombat 1")
+        let drive2 = tempRoot.appendingPathComponent("SSD2/Games/Mortal Kombat 1")
+        try FileManager.default.createDirectory(at: drive1, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: drive2, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        
+        let exe1 = drive1.appendingPathComponent("MK12.exe")
+        let exe2 = drive2.appendingPathComponent("MK12.exe")
+        var data = Data(count: 2048)
+        data[0] = 0x4D; data[1] = 0x5A; data[0x3C] = 0x80
+        data[0x80] = 0x50; data[0x81] = 0x45; data[0x84] = 0x64; data[0x85] = 0x86
+        try data.write(to: exe1)
+        try data.write(to: exe2)
+        
+        let paths = PathProvider(customRoot: tempRoot.appendingPathComponent("Internal"))
+        let prefixMgr = PrefixManager(pathProvider: paths)
+        let processMgr = ProcessManager(pathProvider: paths, customRunnerBinary: "/usr/bin/true")
+        let gameMgr = GameManager(pathProvider: paths, prefixManager: prefixMgr, processManager: processMgr)
+        
+        let disc1 = DiscoveredExternalGame(title: "Mortal Kombat 1", mainExecutablePath: exe1.resolvingSymlinksInPath().path, installDirectory: drive1.path, source: .externalDrive, volumeName: "SSD1")
+        let disc2 = DiscoveredExternalGame(title: "Mortal Kombat 1", mainExecutablePath: exe2.resolvingSymlinksInPath().path, installDirectory: drive2.path, source: .externalDrive, volumeName: "SSD2")
+        
+        let game1 = try gameMgr.importDiscoveredExternalGame(discovered: disc1, locationType: .internalStorage, customPrefixPath: nil)
+        let game2 = try gameMgr.importDiscoveredExternalGame(discovered: disc2, locationType: .internalStorage, customPrefixPath: nil)
+        
+        try assertTrue(game1.id != game2.id, "Installations on separate drives must have unique IDs")
+        try assertTrue(game1.volumeName == "SSD1", "First game belongs to SSD1")
+        try assertTrue(game2.volumeName == "SSD2", "Second game belongs to SSD2")
+    }
+    
+    static func testDisconnectedDriveHandlingWithoutCrash() async throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("MacZeroDisconnectTest_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        
+        let paths = PathProvider(customRoot: tempRoot)
+        let prefixMgr = PrefixManager(pathProvider: paths)
+        let processMgr = ProcessManager(pathProvider: paths, customRunnerBinary: "/usr/bin/true")
+        let gameMgr = GameManager(pathProvider: paths, prefixManager: prefixMgr, processManager: processMgr)
+        
+        let disconnectedGame = Game(
+            id: "disconnected-game-test",
+            title: "Mortal Kombat 1",
+            executablePath: "/Volumes/DisconnectedSSD/Games/MK12.exe",
+            volumeName: "DisconnectedSSD",
+            isExternal: true,
+            isDriveConnected: false
+        )
+        
+        try gameMgr.updateGame(disconnectedGame)
+        
+        // Attempting to resolve path should throw graceful GameDriveResolutionError rather than crashing
+        let resolver = ExternalGamePathResolver()
+        var caughtError = false
+        do {
+            _ = try resolver.resolveGamePath(game: disconnectedGame)
+        } catch let err as GameDriveResolutionError {
+            caughtError = true
+            try assertTrue(err.localizedDescription.contains("DisconnectedSSD"), "Error message must mention the disconnected drive name")
+        } catch {
+            caughtError = true
+        }
+        
+        try assertTrue(caughtError, "Must catch disconnected drive error safely without crashing")
+    }
 }
+

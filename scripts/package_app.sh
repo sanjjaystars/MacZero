@@ -64,5 +64,10 @@ cat << 'EOF' > "${APP_BUNDLE}/Contents/Info.plist"
 </plist>
 EOF
 
+if [ -f "${ROOT_DIR}/MacZero.entitlements" ]; then
+    echo "==> Applying ad-hoc codesign with user-selected file & JIT entitlements..."
+    codesign --force --deep --sign - --entitlements "${ROOT_DIR}/MacZero.entitlements" "${APP_BUNDLE}"
+fi
+
 echo "==> Successfully created MacZero.app!"
 echo "    Launch GUI directly with: open ${APP_BUNDLE}"

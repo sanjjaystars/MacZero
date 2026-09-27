@@ -23,6 +23,11 @@ public final class LibraryViewModel: ObservableObject {
     @Published public var showCrashAlert: Bool = false
     @Published public var isBenchmarkingDrive: Bool = false
     @Published public var driveBenchmarkMessage: String? = nil
+    @Published public var showVerificationSheet: Bool = false
+    @Published public var verificationResult: GameVerificationResult? = nil
+    @Published public var isScanningDrive: Bool = false
+    @Published public var scanDriveMessage: String? = nil
+    @Published public var droppedFolderURL: URL? = nil
     
     private let gameManager: GameManagerProtocol
     private let driveManager: ExternalDriveManagerProtocol
@@ -32,9 +37,10 @@ public final class LibraryViewModel: ObservableObject {
     
     public enum SidebarCategory: String, CaseIterable, Identifiable {
         case allGames = "All Games"
+        case readyGames = "Ready to Play"
         case externalGames = "External Drives"
-        case internalGames = "Internal SSD"
         case steamGames = "Steam Libraries"
+        case internalGames = "Internal SSD"
         case favorites = "Favorites"
         case dx12Games = "DirectX 12"
         case customGames = "Custom Windows .exe"
@@ -44,6 +50,7 @@ public final class LibraryViewModel: ObservableObject {
         public var systemImage: String {
             switch self {
             case .allGames: return "gamecontroller.fill"
+            case .readyGames: return "checkmark.circle.fill"
             case .externalGames: return "externaldrive.fill"
             case .internalGames: return "internaldrive.fill"
             case .steamGames: return "cloud.fill"
@@ -92,6 +99,8 @@ public final class LibraryViewModel: ObservableObject {
             switch filterCategory {
             case .allGames:
                 matchesCategory = true
+            case .readyGames:
+                matchesCategory = game.isReady
             case .externalGames:
                 matchesCategory = game.isExternal
             case .internalGames:
@@ -209,5 +218,39 @@ public final class LibraryViewModel: ObservableObject {
     public func removeDrive(id: String) {
         driveManager.removeDrive(id: id)
         refreshDrives()
+    }
+    
+    public func verifySelectedGame() {
+        guard let id = selectedGameId else { return }
+        self.verificationResult = gameManager.verifyGame(gameId: id)
+        self.showVerificationSheet = true
+    }
+    
+    public func handleDroppedURLs(_ urls: [URL]) {
+        guard let url = urls.first else { return }
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
+            if isDir.boolValue {
+                self.droppedFolderURL = url
+                self.showExternalImportSheet = true
+            } else if url.pathExtension.lowercased() == "exe" {
+                self.showAddGameWizard = true
+            }
+        }
+    }
+    
+    public func quickScanDrive(drive: ExternalDrive) {
+        isScanningDrive = true
+        scanDriveMessage = "Scanning '\(drive.name)' for Windows games..."
+        Task {
+            let discovered = gameManager.scanDrive(driveId: drive.id, depth: .quick)
+            for disc in discovered {
+                _ = try? gameManager.importDiscoveredExternalGame(discovered: disc, locationType: .internalStorage, customPrefixPath: nil)
+            }
+            self.isScanningDrive = false
+            self.scanDriveMessage = "Registered \(discovered.count) game(s) from '\(drive.name)'."
+            self.refreshGames()
+            self.refreshDrives()
+        }
     }
 }

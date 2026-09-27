@@ -56,7 +56,7 @@ struct AddGameWizardView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Add Windows Game")
                         .font(.system(size: 18, weight: .bold))
-                    Text("Install and automatically configure Windows games for Apple Silicon")
+                    Text("Add and configure existing Windows games for Apple Silicon without installation")
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
@@ -188,8 +188,8 @@ struct AddGameWizardView: View {
             // Footer
             HStack {
                 Spacer()
-                Button("Install & Configure") {
-                    installGame()
+                Button("Add to Library") {
+                    addGameToLibrary()
                 }
                 .buttonStyle(.borderedProminent)
                 .disabled(vm.selectedSource == .steam ? vm.selectedSteamGame == nil : vm.executablePath.isEmpty)
@@ -200,7 +200,7 @@ struct AddGameWizardView: View {
         .frame(width: 540, height: 480)
     }
     
-    private func installGame() {
+    private func addGameToLibrary() {
         do {
             if vm.selectedSource == .steam, let sg = vm.selectedSteamGame {
                 _ = try GameManager.shared.importSteamGame(discovered: sg)

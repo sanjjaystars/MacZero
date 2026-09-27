@@ -27,13 +27,51 @@ struct SidebarView: View {
                 }
             }
             
+            if !viewModel.drives.isEmpty {
+                Section("Connected Drives") {
+                    ForEach(viewModel.drives) { drive in
+                        HStack(spacing: 8) {
+                            Circle()
+                                .fill(drive.isConnected ? Color.green : Color.gray)
+                                .frame(width: 8, height: 8)
+                            
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(drive.name)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .lineLimit(1)
+                                
+                                let gameCount = viewModel.games.filter { $0.volumeUUID == drive.volumeUUID || $0.volumeName == drive.name }.count
+                                Text("\(gameCount) game(s) • \(drive.fileSystemType)")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+                            
+                            Spacer()
+                            
+                            if drive.isConnected {
+                                Button(action: {
+                                    viewModel.quickScanDrive(drive: drive)
+                                }) {
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                        .font(.system(size: 11))
+                                        .foregroundColor(.accentColor)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Scan \(drive.name) for Windows games")
+                            }
+                        }
+                        .padding(.vertical, 3)
+                    }
+                }
+            }
+            
             Section("External Storage") {
                 Button(action: { viewModel.showGameDrivesSheet = true }) {
                     HStack {
                         Image(systemName: "externaldrive.fill")
                             .frame(width: 20)
                             .foregroundColor(.accentColor)
-                        Text("Game Drives")
+                        Text("Manage Drives")
                         Spacer()
                         Text("\(viewModel.drives.filter { $0.isConnected }.count)")
                             .font(.system(size: 11, weight: .bold))
@@ -101,6 +139,8 @@ struct SidebarView: View {
         switch category {
         case .allGames:
             return viewModel.games.count
+        case .readyGames:
+            return viewModel.games.filter { $0.isReady }.count
         case .externalGames:
             return viewModel.games.filter { $0.isExternal }.count
         case .internalGames:

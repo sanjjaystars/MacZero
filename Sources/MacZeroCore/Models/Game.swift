@@ -37,9 +37,12 @@ public enum BinaryArchitecture: String, Codable, CaseIterable, Sendable {
 }
 
 public enum GameSource: String, Codable, CaseIterable, Sendable {
+    case externalDrive = "External Drive"
+    case internalStorage = "Internal Storage"
     case steam = "Steam"
     case epic = "Epic Games"
     case gog = "GOG"
+    case custom = "Custom"
     case customExe = "Executable (.exe)"
     case folder = "Game Folder"
     case iso = "Disk Image (.iso)"
@@ -191,6 +194,71 @@ public struct Game: Identifiable, Codable, Equatable, Hashable, Sendable {
         self.launchMode = launchMode
         self.prefixLocationType = prefixLocationType
         self.externalPrefixPath = externalPrefixPath
+    }
+    
+    // Convenience Accessors matching URL-based and section 48 specifications
+    public var name: String {
+        get { title }
+        set { title = newValue }
+    }
+    
+    public var gameURL: URL {
+        return URL(fileURLWithPath: workingDirectory ?? (executablePath as NSString).deletingLastPathComponent)
+    }
+    
+    public var executableURL: URL? {
+        return URL(fileURLWithPath: executablePath)
+    }
+    
+    public var volumeIdentifier: String? {
+        return driveIdentifier ?? volumeUUID
+    }
+    
+    public var compatibilityProfile: String? {
+        return profileId
+    }
+    
+    public var runtimeVersion: String? {
+        return runtimeId
+    }
+    
+    public var playTime: TimeInterval {
+        get { Double(playTimeSeconds) }
+        set { playTimeSeconds = Int(newValue) }
+    }
+    
+    public var isReady: Bool {
+        return !isExternal || isDriveConnected
+    }
+}
+
+public struct GameVerificationItem: Identifiable, Codable, Equatable, Hashable, Sendable {
+    public let id: String
+    public let name: String
+    public let passed: Bool
+    public let detail: String
+    
+    public init(name: String, passed: Bool, detail: String) {
+        self.id = name
+        self.name = name
+        self.passed = passed
+        self.detail = detail
+    }
+}
+
+public struct GameVerificationResult: Codable, Equatable, Hashable, Sendable {
+    public let gameId: String
+    public let gameTitle: String
+    public let overallPassed: Bool
+    public let items: [GameVerificationItem]
+    public let verifiedAt: Date
+    
+    public init(gameId: String, gameTitle: String, overallPassed: Bool, items: [GameVerificationItem], verifiedAt: Date = Date()) {
+        self.gameId = gameId
+        self.gameTitle = gameTitle
+        self.overallPassed = overallPassed
+        self.items = items
+        self.verifiedAt = verifiedAt
     }
 }
 

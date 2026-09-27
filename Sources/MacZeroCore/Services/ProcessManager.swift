@@ -175,27 +175,24 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
         
         let logFileURL = pathProvider.logPath(forGameId: game.id)
         
-        try process.run()
-        let pid = process.processIdentifier
-        loggingService.log("Process started with PID \(pid)", level: .info, category: "Process", gameId: game.id)
-        
-        // Handle stream output asynchronously
         let fileHandle = pipe.fileHandleForReading
         fileHandle.readabilityHandler = { handle in
             let data = handle.availableData
-            if !data.isEmpty, let output = String(data: data, encoding: .utf8) {
+            guard !data.isEmpty else {
+                handle.readabilityHandler = nil
+                return
+            }
+            if let output = String(data: data, encoding: .utf8) {
                 onOutput?(output)
                 self.loggingService.log(output.trimmingCharacters(in: .newlines), level: .debug, category: "GameOutput", gameId: game.id)
             }
         }
         
-        // Wait for process in background without blocking main thread
         return await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                process.waitUntilExit()
+            process.terminationHandler = { proc in
                 fileHandle.readabilityHandler = nil
                 
-                let exitCode = process.terminationStatus
+                let exitCode = proc.terminationStatus
                 let didCrash = exitCode != 0
                 
                 var crashReason: String? = nil
@@ -207,11 +204,27 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
                 }
                 
                 let result = ProcessLaunchResult(
-                    pid: pid,
+                    pid: proc.processIdentifier,
                     exitCode: exitCode,
                     didCrash: didCrash,
                     logFilePath: logFileURL.path,
                     crashReason: crashReason
+                )
+                continuation.resume(returning: result)
+            }
+            
+            do {
+                try process.run()
+                let pid = process.processIdentifier
+                loggingService.log("Process started with PID \(pid)", level: .info, category: "Process", gameId: game.id)
+            } catch {
+                fileHandle.readabilityHandler = nil
+                let result = ProcessLaunchResult(
+                    pid: 0,
+                    exitCode: -1,
+                    didCrash: true,
+                    logFilePath: logFileURL.path,
+                    crashReason: "Failed to spawn process: \(error.localizedDescription)"
                 )
                 continuation.resume(returning: result)
             }
