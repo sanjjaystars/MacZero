@@ -1,8 +1,8 @@
-# MacGame
+# MacZero
 
 > **"Play your Windows games on Mac."**
 
-MacGame is a graphical compatibility platform, game manager, and translation runtime manager engineered specifically for Apple Silicon Macs (M1, M2, M3, M4, and M5). It automates the complex configuration of Wine prefixes, DirectX translation layers, dynamic libraries, and graphics pipelines to deliver a seamless:
+MacZero is a graphical compatibility platform, game manager, and translation runtime manager engineered specifically for Apple Silicon Macs (M1, M2, M3, M4, and M5). It automates the complex configuration of Wine prefixes, DirectX translation layers, dynamic libraries, and graphics pipelines to deliver a seamless:
 
 **Install Windows game → Configure automatically → Click Play** experience.
 
@@ -12,7 +12,7 @@ MacGame is a graphical compatibility platform, game manager, and translation run
 
 - **DirectX 12 Focused Translation Pipeline**: Maps DirectX 12 calls via **VKD3D-Proton** → **Vulkan** → **MoltenVK** → **Metal 3** directly onto the Apple Silicon unified GPU.
 - **Legacy DirectX & Vulkan Support**: Automatic fallback and optimization for DirectX 11, 10, and 9 via **DXVK**, and native Vulkan mapping via **MoltenVK**.
-- **Isolated Game Prefix System**: Every game runs in a dedicated, sandboxed Wine prefix located in standard macOS directories (`~/Library/Application Support/MacGame/prefixes/<game-id>`), preventing cross-game configuration pollution and dependency conflicts.
+- **Isolated Game Prefix System**: Every game runs in a dedicated, sandboxed Wine prefix located in standard macOS directories (`~/Library/Application Support/MacZero/prefixes/<game-id>`), preventing cross-game configuration pollution and dependency conflicts.
 - **Automatic PE Binary Inspection**: Fast analysis of Windows `.exe` and `.msi` headers to detect architecture (x86_64, ARM64, 32-bit), graphics APIs (`d3d12`, `d3d11`, `d3d9`, `vulkan`), and kernel-level anti-cheat/DRM blockers.
 - **Honest Compatibility Engine**: Clear labeling of game compatibility:
   - 🟢 **Compatible**: Verified working with Wine/VKD3D/DXVK.
@@ -21,7 +21,7 @@ MacGame is a graphical compatibility platform, game manager, and translation run
   - ⚪ **Unknown**: Not yet cataloged.
 - **Native macOS SwiftUI Interface**: Modern multi-pane UI featuring a Game Library grid, hero game cards, pipeline diagrams, one-click safe mode recovery, and live execution logging.
 - **Automated Steam Integration**: Discovers existing Steam libraries, identifies AppIDs, parses `libraryfolders.vdf`, and distinguishes native macOS ports from Windows `.exe` releases.
-- **Full CLI Support (`macgame`)**: Complete command-line automation for headless or power-user workflows (`list`, `scan`, `install`, `launch`, `diagnose`, `runtime`, `prefix`, `logs`).
+- **Full CLI Support (`maczero`)**: Complete command-line automation for headless or power-user workflows (`list`, `scan`, `install`, `launch`, `diagnose`, `runtime`, `prefix`, `logs`).
 
 ---
 
@@ -38,7 +38,7 @@ MacGame is a graphical compatibility platform, game manager, and translation run
 
 ### Prerequisites
 
-MacGame leverages standard Apple Silicon developer tools and open-source graphics translators:
+MacZero leverages standard Apple Silicon developer tools and open-source graphics translators:
 
 ```bash
 # Install Homebrew (if not already installed)
@@ -54,42 +54,42 @@ brew install --cask wine-staging
 ### Compiling with Swift Package Manager
 
 ```bash
-cd /Users/scorpion/.gemini/antigravity-ide/scratch/MacGame
+cd /Users/scorpion/.gemini/antigravity-ide/scratch/MacZero
 
 # Build the Core library, GUI App, and CLI tool
 swift build
 
 # Run unit tests
-swift test
+swift run maczero-tests
 ```
 
 ### Running the CLI
 
 ```bash
 # List games in library
-swift run macgame list
+swift run maczero list
 
 # Run system and hardware diagnostics
-swift run macgame diagnose
+swift run maczero diagnose
 
 # Scan local Steam library
-swift run macgame scan
+swift run maczero scan
 
 # View discovered runtimes
-swift run macgame runtime list
+swift run maczero runtime list
 ```
 
 ### Launching the Graphical Application
 
 ```bash
-swift run MacGameApp
+swift run MacZeroApp
 ```
 
 ---
 
 ## First Milestone Target Game: Mortal Kombat 1
 
-MacGame includes a dedicated compatibility profile for **Mortal Kombat 1**:
+MacZero includes a dedicated compatibility profile for **Mortal Kombat 1**:
 
 - **Graphics API**: DirectX 12 (Feature Level 12_1).
 - **Primary Translation Layer**: VKD3D-Proton 2.12+.
@@ -102,13 +102,13 @@ MacGame includes a dedicated compatibility profile for **Mortal Kombat 1**:
 ## Troubleshooting & Safe Mode
 
 If a game fails to start or crashes during execution:
-1. **Run Diagnostics**: Click **Diagnostics** or run `macgame diagnose <game-id>` to verify Apple Silicon Metal features, Wine binaries, and file permissions.
-2. **Safe Mode Launch**: Launch the game in **Safe Mode** from the dropdown menu (or `macgame launch <game> --safe-mode`) to disable experimental shader tweaks, async queues, and custom DLL overrides.
-3. **Repair Prefix**: Click **Repair Prefix** (or `macgame prefix repair <game-id>`) to clean up stale wineserver locks and recreate corrupted Windows registry entries without deleting game save data.
-4. **Inspect Logs**: View live terminal output via the **Logs** tab or `macgame logs <game-id>`.
+1. **Run Diagnostics**: Click **Diagnostics** or run `maczero diagnose <game-id>` to verify Apple Silicon Metal features, Wine binaries, and file permissions.
+2. **Safe Mode Launch**: Launch the game in **Safe Mode** from the dropdown menu (or `maczero launch <game> --safe-mode`) to disable experimental shader tweaks, async queues, and custom DLL overrides.
+3. **Repair Prefix**: Click **Repair Prefix** (or `maczero prefix repair <game-id>`) to clean up stale wineserver locks and recreate corrupted Windows registry entries without deleting game save data.
+4. **Inspect Logs**: View live terminal output via the **Logs** tab or `maczero logs <game-id>`.
 
 ---
 
 ## Legal & Licensing
 
-MacGame does **not** bundle copyrighted game binaries, proprietary Microsoft Windows operating system files, or DRM circumvention tools. Users must legally own their Windows PC games. All bundled configurations utilize open-source translation layers under their respective MIT, LGPL, and Apache licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSE](LICENSE) for details.
+MacZero does **not** bundle copyrighted game binaries, proprietary Microsoft Windows operating system files, or DRM circumvention tools. Users must legally own their Windows PC games. All bundled configurations utilize open-source translation layers under their respective MIT, LGPL, and Apache licenses. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) and [LICENSE](LICENSE) for details.

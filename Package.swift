@@ -2,52 +2,52 @@
 import PackageDescription
 
 let package = Package(
-    name: "MacGame",
+    name: "MacZero",
     platforms: [
         .macOS(.v14)
     ],
     products: [
         .library(
-            name: "MacGameCore",
-            targets: ["MacGameCore"]
+            name: "MacZeroCore",
+            targets: ["MacZeroCore"]
         ),
         .executable(
-            name: "MacGameApp",
-            targets: ["MacGameApp"]
+            name: "MacZeroApp",
+            targets: ["MacZeroApp"]
         ),
         .executable(
-            name: "macgame",
-            targets: ["MacGameCLI"]
+            name: "maczero",
+            targets: ["MacZeroCLI"]
         ),
         .executable(
-            name: "macgame-tests",
-            targets: ["MacGameTests"]
+            name: "maczero-tests",
+            targets: ["MacZeroTests"]
         )
     ],
     dependencies: [],
     targets: [
         .target(
-            name: "MacGameCore",
+            name: "MacZeroCore",
             dependencies: [],
-            path: "Sources/MacGameCore",
+            path: "Sources/MacZeroCore",
             resources: [
                 .process("Resources")
             ]
         ),
         .executableTarget(
-            name: "MacGameApp",
-            dependencies: ["MacGameCore"],
-            path: "Sources/MacGameApp"
+            name: "MacZeroApp",
+            dependencies: ["MacZeroCore"],
+            path: "Sources/MacZeroApp"
         ),
         .executableTarget(
-            name: "MacGameCLI",
-            dependencies: ["MacGameCore"],
-            path: "Sources/MacGameCLI"
+            name: "MacZeroCLI",
+            dependencies: ["MacZeroCore"],
+            path: "Sources/MacZeroCLI"
         ),
         .executableTarget(
-            name: "MacGameTests",
-            dependencies: ["MacGameCore"],
-            path: "Tests/MacGameTests"
+            name: "MacZeroTests",
+            dependencies: ["MacZeroCore"],
+            path: "Tests/MacZeroTests"
         )
     ]
 )

@@ -1,6 +1,6 @@
 # Third-Party Notices and Open Source Licenses
 
-MacGame utilizes and orchestrates several open-source technologies to achieve high-performance Windows compatibility on Apple Silicon macOS. Each component is subject to its respective open-source license terms:
+MacZero utilizes and orchestrates several open-source technologies to achieve high-performance Windows compatibility on Apple Silicon macOS. Each component is subject to its respective open-source license terms:
 
 ---
 
