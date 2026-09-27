@@ -96,6 +96,13 @@ struct MacZeroApp: App {
                 }
                 
                 ToolbarItem(placement: .automatic) {
+                    Button(action: { viewModel.showGameDrivesSheet = true }) {
+                        Label("Game Drives", systemImage: "externaldrive.fill")
+                    }
+                    .help("Manage external SSDs, HDDs, and game drives")
+                }
+                
+                ToolbarItem(placement: .automatic) {
                     Button(action: { viewModel.showDiagnosticsSheet = true }) {
                         Label("Diagnostics", systemImage: "waveform.path.ecg")
                     }
@@ -113,6 +120,12 @@ struct MacZeroApp: App {
             .sheet(isPresented: $viewModel.showAddGameWizard) {
                 AddGameWizardView(viewModel: viewModel)
             }
+            .sheet(isPresented: $viewModel.showGameDrivesSheet) {
+                GameDrivesView(viewModel: viewModel)
+            }
+            .sheet(isPresented: $viewModel.showExternalImportSheet) {
+                ExternalLibraryImportView(viewModel: viewModel)
+            }
             .sheet(isPresented: $viewModel.showDiagnosticsSheet) {
                 DiagnosticsView(targetGame: viewModel.selectedGame)
             }
@@ -122,6 +135,7 @@ struct MacZeroApp: App {
             .sheet(isPresented: $viewModel.showLogsSheet) {
                 LogViewerSheet(targetGameId: viewModel.selectedGameId)
             }
+
             .alert("Game Execution Alert", isPresented: $viewModel.showCrashAlert) {
                 Button("Try Safe Mode") {
                     viewModel.launchSelectedGame(mode: .safeMode)

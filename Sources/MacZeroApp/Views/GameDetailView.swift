@@ -41,6 +41,19 @@ struct GameDetailView: View {
                                 .cornerRadius(4)
                                 .foregroundColor(.white)
                             
+                            if game.isExternal {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "externaldrive.fill")
+                                    Text(game.volumeName ?? "External Drive")
+                                }
+                                .font(.system(size: 11, weight: .bold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.purple.opacity(0.4))
+                                .cornerRadius(4)
+                                .foregroundColor(.white)
+                            }
+                            
                             Text(game.compatibilityStatus.badgeText)
                                 .font(.system(size: 11, weight: .bold))
                                 .padding(.horizontal, 8)
@@ -61,6 +74,35 @@ struct GameDetailView: View {
                     .padding(20)
                 }
                 
+                // Disconnected Drive Warning Banner
+                if game.isExternal && !game.isDriveConnected {
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 24))
+                            .foregroundColor(.orange)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("⚠ \(game.volumeName ?? "Game Drive") is disconnected")
+                                .font(.system(size: 14, weight: .bold))
+                                .foregroundColor(.orange)
+                            Text("This game is installed on an external volume that is currently unmounted. Plug the drive back in to resume play.")
+                                .font(.system(size: 12))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button("Scan Drives") {
+                            viewModel.refreshDrives()
+                        }
+                        .buttonStyle(.bordered)
+                    }
+                    .padding(14)
+                    .background(Color.orange.opacity(0.12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+                    )
+                    .cornerRadius(10)
+                }
+                
                 // Primary Action Bar
                 HStack(spacing: 12) {
                     Button(action: { viewModel.launchSelectedGame(mode: .standard) }) {
@@ -70,24 +112,26 @@ struct GameDetailView: View {
                                     .scaleEffect(0.7)
                                     .colorInvert()
                             } else {
-                                Image(systemName: "play.fill")
+                                Image(systemName: (!game.isExternal || game.isDriveConnected) ? "play.fill" : "exclamationmark.circle")
                             }
-                            Text(viewModel.isLaunching ? "LAUNCHING..." : "PLAY")
+                            Text(viewModel.isLaunching ? "LAUNCHING..." : ((game.isExternal && !game.isDriveConnected) ? "DRIVE DISCONNECTED" : "PLAY"))
                                 .font(.system(size: 14, weight: .bold))
                         }
-                        .frame(minWidth: 140)
+                        .frame(minWidth: 160)
                         .padding(.vertical, 10)
-                        .background(Color.accentColor)
+                        .background((game.isExternal && !game.isDriveConnected) ? Color.gray : Color.accentColor)
                         .foregroundColor(.white)
                         .cornerRadius(8)
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isLaunching)
+                    .disabled(viewModel.isLaunching || (game.isExternal && !game.isDriveConnected))
                     
                     Menu {
                         Button("Launch in Safe Mode") {
                             viewModel.launchSelectedGame(mode: .safeMode)
                         }
+                        .disabled(game.isExternal && !game.isDriveConnected)
+                        
                         Button("Run Full Diagnostics") {
                             viewModel.showDiagnosticsSheet = true
                         }
@@ -143,6 +187,7 @@ struct GameDetailView: View {
                     }
                     .buttonStyle(.plain)
                 }
+
                 
                 // Graphics Compatibility Pipeline Visualization
                 VStack(alignment: .leading, spacing: 10) {
@@ -195,12 +240,21 @@ struct GameDetailView: View {
                         .foregroundColor(.secondary)
                     
                     VStack(spacing: 8) {
+                        DetailRow(label: "Storage Location", value: game.isExternal ? "External: \(game.volumeName ?? "Drive")" : "Mac Internal Storage")
                         DetailRow(label: "Executable Path", value: game.executablePath)
+                        if let rel = game.relativePath {
+                            DetailRow(label: "Relative Path", value: rel)
+                        }
                         DetailRow(label: "Working Directory", value: game.workingDirectory ?? "Default Prefix Directory")
-                        DetailRow(label: "Prefix Location", value: PathProvider.shared.prefixPath(forGameId: game.prefixId).path)
+                        DetailRow(label: "Prefix Location", value: game.externalPrefixPath ?? PathProvider.shared.prefixPath(forGameId: game.prefixId).path)
+                        DetailRow(label: "Prefix Storage", value: game.prefixLocationType.rawValue)
+                        if let appId = game.sourceAppId {
+                            DetailRow(label: "Steam App ID", value: appId)
+                        }
                         DetailRow(label: "Runtime Profile", value: game.profileId)
                         DetailRow(label: "Launch Arguments", value: game.launchArguments.isEmpty ? "None" : game.launchArguments.joined(separator: " "))
                     }
+
                     .padding(12)
                     .background(Color(nsColor: .controlBackgroundColor))
                     .cornerRadius(10)

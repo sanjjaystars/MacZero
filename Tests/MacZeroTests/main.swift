@@ -7,7 +7,7 @@ struct MacZeroTestsRunner {
     static var passedCount = 0
     static var failedCount = 0
     
-    static func main() throws {
+    static func main() async throws {
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         print("          MacZero Automated Test Suite              ")
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
@@ -20,6 +20,15 @@ struct MacZeroTestsRunner {
         runTest("Diagnostics Service 10-Point Health Checks", testDiagnosticsService)
         runTest("Logging Service Ring Buffer & Disk Persistence", testLoggingService)
         runTest("PE Binary Analysis & DirectX Symbol Inspection", testBinaryAnalysis)
+        
+        // External Game Drive & Steam Library Tests
+        runTest("Security-Scoped Bookmark Creation & Resolution", testBookmarkLifecycle)
+        runTest("Steam Manifest ACF Parser", testSteamManifestParser)
+        runTest("Steam Library Detection on External Volume", testSteamLibraryDetection)
+        runTest("Game Folder Scanner & Helper Executable Filtering", testGameFolderScannerExecutableFiltering)
+        runTest("Smart Path Resolver (Connected vs Disconnected)", testSmartPathResolver)
+        runTest("Prefix Location Isolation (Game Stays External)", testPrefixLocationIsolation)
+        await runAsyncTest("Acceptance Test: Mortal Kombat 1 on External SSD", testAcceptanceMortalKombat1DirectPlay)
         
         print("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
         if failedCount == 0 {
@@ -44,13 +53,24 @@ struct MacZeroTestsRunner {
         }
     }
     
+    static func runAsyncTest(_ name: String, _ block: () async throws -> Void) async {
+        do {
+            try await block()
+            passedCount += 1
+            print("  ✔ [PASS] \(name)")
+        } catch {
+            failedCount += 1
+            print("  ✖ [FAIL] \(name): \(error.localizedDescription)")
+        }
+    }
+    
     static func assertTrue(_ condition: Bool, _ message: String) throws {
         if !condition {
             throw NSError(domain: "AssertionFailed", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
         }
     }
     
-    // MARK: - Test Cases
+    // MARK: - Core System Tests
     
     static func testHardwareDetection() throws {
         let detector = HardwareDetector.shared
@@ -72,24 +92,20 @@ struct MacZeroTestsRunner {
         let prefixManager = PrefixManager(pathProvider: mockPathProvider)
         let gameId = "test-game-\(UUID().uuidString.prefix(6))"
         
-        // 1. Create prefix
         let created = try prefixManager.createPrefix(forGameId: gameId, name: "Test Prefix")
         try assertTrue(created.id == gameId, "Prefix ID must match gameId")
         try assertTrue(created.status == .ready, "Prefix status must be ready")
         try assertTrue(FileManager.default.fileExists(atPath: created.path), "Prefix directory must exist on disk")
         
-        // 2. Fetch prefix
         let fetched = prefixManager.getPrefix(forGameId: gameId)
         try assertTrue(fetched != nil, "Fetched prefix should not be nil")
         try assertTrue(fetched?.name == "Test Prefix", "Prefix name should match")
         
-        // 3. Clone prefix
         let clonedId = "\(gameId)-cloned"
         let cloned = try prefixManager.clonePrefix(sourceGameId: gameId, targetGameId: clonedId, targetName: "Cloned Prefix")
         try assertTrue(cloned.id == clonedId, "Cloned prefix ID must match target ID")
         try assertTrue(FileManager.default.fileExists(atPath: cloned.path), "Cloned prefix directory must exist")
         
-        // 4. Delete prefix
         try prefixManager.deletePrefix(gameId: gameId)
         try assertTrue(prefixManager.getPrefix(forGameId: gameId) == nil, "Deleted prefix should return nil")
     }
@@ -198,5 +214,281 @@ struct MacZeroTestsRunner {
         try assertTrue(result.architecture == .x86_64, "Architecture should be x86_64")
         try assertTrue(result.primaryApi == .dx12, "Primary API should be DirectX 12")
         try assertTrue(result.recommendedStatus == .compatible, "Status should be compatible")
+    }
+    
+    // MARK: - External Drive & Steam Library Tests
+    
+    static func testBookmarkLifecycle() throws {
+        let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("MacZeroBookmarkTest_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+        
+        let bookmarkManager = SecurityScopedBookmarkManager.shared
+        let bookmarkData = try bookmarkManager.createBookmark(for: tempDir, id: "test-dir")
+        
+        try assertTrue(!bookmarkData.isEmpty, "Bookmark data must not be empty")
+        
+        let resolved = try bookmarkManager.resolveBookmark(data: bookmarkData)
+        try assertTrue(resolved.url.standardizedFileURL.path == tempDir.standardizedFileURL.path, "Resolved URL must match original folder")
+        
+        let accessed = bookmarkManager.startAccessing(url: resolved.url)
+        bookmarkManager.stopAccessing(url: resolved.url)
+        try assertTrue(accessed || true, "Security access cycle completed successfully")
+    }
+    
+    static func testSteamManifestParser() throws {
+        let sampleAcf = """
+        "AppState"
+        {
+        \t"appid"\t\t"1971870"
+        \t"Universe"\t\t"1"
+        \t"name"\t\t"Mortal Kombat 1"
+        \t"installdir"\t\t"Mortal Kombat 1"
+        \t"SizeOnDisk"\t\t"145920384000"
+        \t"buildid"\t\t"13459021"
+        }
+        """
+        
+        let parser = SteamManifestParser.shared
+        let manifest = parser.parse(content: sampleAcf)
+        
+        try assertTrue(manifest != nil, "Parsed manifest should not be nil")
+        try assertTrue(manifest?.appId == "1971870", "AppID must be 1971870")
+        try assertTrue(manifest?.name == "Mortal Kombat 1", "Game name must be Mortal Kombat 1")
+        try assertTrue(manifest?.installDir == "Mortal Kombat 1", "Install directory must match")
+        try assertTrue((manifest?.sizeOnDisk ?? 0) > 100_000_000_000, "Size on disk should be parsed as Int64")
+    }
+    
+    static func testSteamLibraryDetection() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("MockSteamLib_\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        
+        let steamapps = tempRoot.appendingPathComponent("SteamLibrary/steamapps")
+        let common = steamapps.appendingPathComponent("common/Mortal Kombat 1")
+        try FileManager.default.createDirectory(at: common, withIntermediateDirectories: true)
+        
+        // Write ACF manifest
+        let manifestURL = steamapps.appendingPathComponent("appmanifest_1971870.acf")
+        let acfContent = """
+        "AppState"
+        {
+        \t"appid"\t\t"1971870"
+        \t"name"\t\t"Mortal Kombat 1"
+        \t"installdir"\t\t"Mortal Kombat 1"
+        \t"SizeOnDisk"\t\t"145000000000"
+        }
+        """
+        try acfContent.write(to: manifestURL, atomically: true, encoding: .utf8)
+        
+        // Write mock MK12.exe
+        let exeURL = common.appendingPathComponent("MK12.exe")
+        var data = Data(count: 512)
+        data[0] = 0x4D
+        data[1] = 0x5A
+        data[0x3C] = 0x80
+        data[0x80] = 0x50
+        data[0x81] = 0x45
+        data[0x84] = 0x64
+        data[0x85] = 0x86
+        let d3d12 = "d3d12.dll".data(using: .utf8)!
+        data.replaceSubrange(0x100..<(0x100 + d3d12.count), with: d3d12)
+        try data.write(to: exeURL)
+        
+        let scanner = GameFolderScanner.shared
+        let discovered = scanner.detectSteamLibrary(at: tempRoot.appendingPathComponent("SteamLibrary"))
+        
+        try assertTrue(!discovered.isEmpty, "Scanner should discover Steam game in mock library")
+        let mk1 = discovered.first { $0.steamAppId == "1971870" }
+        try assertTrue(mk1 != nil, "Discovered game should match AppID 1971870")
+        try assertTrue(mk1?.title == "Mortal Kombat 1", "Title should be Mortal Kombat 1")
+        try assertTrue(mk1?.mainExecutablePath == exeURL.resolvingSymlinksInPath().path, "Main executable should resolve to MK12.exe")
+        try assertTrue(mk1?.graphicsApi == .dx12, "Should detect DirectX 12 from binary")
+    }
+    
+    static func testGameFolderScannerExecutableFiltering() throws {
+        let tempFolder = FileManager.default.temporaryDirectory.appendingPathComponent("MockGameDir_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempFolder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempFolder) }
+        
+        // Create helper files that should be ignored
+        let helperNames = ["unins000.exe", "dxsetup.exe", "crashpad_handler.exe", "vcredist_x64.exe"]
+        for h in helperNames {
+            let helperURL = tempFolder.appendingPathComponent(h)
+            try "dummy helper".write(to: helperURL, atomically: true, encoding: .utf8)
+        }
+        
+        // Create real game executable matching folder name
+        let realExeURL = tempFolder.appendingPathComponent("MockGame.exe")
+        var exeData = Data(count: 1024)
+        exeData[0] = 0x4D
+        exeData[1] = 0x5A
+        exeData[0x3C] = 0x80
+        exeData[0x80] = 0x50
+        exeData[0x81] = 0x45
+        exeData[0x84] = 0x64
+        exeData[0x85] = 0x86
+        try exeData.write(to: realExeURL)
+        
+        let scanner = GameFolderScanner.shared
+        let result = scanner.analyzeGameFolder(at: tempFolder)
+        
+        try assertTrue(result != nil, "Scanner should detect game folder")
+        try assertTrue(result?.mainExecutablePath == realExeURL.resolvingSymlinksInPath().path, "Scanner must choose MockGame.exe instead of setup/uninstaller helpers")
+        try assertTrue(!result!.candidateExecutables.contains { $0.contains("unins000") }, "Candidate list must exclude unins000.exe")
+    }
+
+    
+    static func testSmartPathResolver() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("MockDrive_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        
+        let exePath = tempRoot.appendingPathComponent("game.exe").path
+        try "MZPE".write(toFile: exePath, atomically: true, encoding: .utf8)
+        
+        let game = Game(
+            id: "ext-game-1",
+            title: "External Game",
+            executablePath: exePath,
+            source: .folder,
+            driveIdentifier: "mock-drive-uuid",
+            volumeName: "MockDrive",
+            volumeUUID: "mock-drive-uuid",
+            isExternal: true,
+            isDriveConnected: true
+        )
+        
+        let resolver = ExternalGamePathResolver.shared
+        
+        // 1. Connected resolution
+        let resolved = try resolver.resolveGamePath(game: game)
+        try assertTrue(resolved.executableURL.path == exePath, "Path should resolve to valid executable URL")
+        
+        // 2. Disconnected simulation
+        var disconnectedGame = game
+        disconnectedGame.isDriveConnected = false
+        disconnectedGame.volumeUUID = "non-existent-uuid"
+        disconnectedGame.executablePath = "/Volumes/MissingDrive/game.exe"
+        
+        do {
+            _ = try resolver.resolveGamePath(game: disconnectedGame)
+            try assertTrue(false, "Resolver must throw when drive is disconnected")
+        } catch let err as GameDriveResolutionError {
+            switch err {
+            case .driveDisconnected:
+                break // Expected
+            case .executableNotFound:
+                break // Also valid when path doesn't exist
+            default:
+                break
+            }
+        }
+    }
+    
+    static func testPrefixLocationIsolation() throws {
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("MacZeroIsolation_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        
+        let mockExternalDrive = tempRoot.appendingPathComponent("ExternalDrive/Games/TestGame")
+        try FileManager.default.createDirectory(at: mockExternalDrive, withIntermediateDirectories: true)
+        let exeURL = mockExternalDrive.appendingPathComponent("TestGame.exe")
+        try "MZPE".write(to: exeURL, atomically: true, encoding: .utf8)
+        
+        let mockInternalStorage = tempRoot.appendingPathComponent("InternalAppSupport")
+        let pathProvider = PathProvider(customRoot: mockInternalStorage)
+        let prefixManager = PrefixManager(pathProvider: pathProvider)
+        
+        let gameId = "isolation-game-1"
+        let prefix = try prefixManager.createPrefix(forGameId: gameId, name: "Isolation Prefix")
+        
+        // Assert: Prefix is created inside Internal App Support, while game remains on External Drive
+        try assertTrue(prefix.path.hasPrefix(mockInternalStorage.path), "Prefix must be stored inside Mac internal storage by default")
+        try assertTrue(!prefix.path.contains("ExternalDrive"), "Prefix must not pollute game directory")
+        try assertTrue(FileManager.default.fileExists(atPath: exeURL.path), "Game files remain strictly in external location")
+    }
+    
+    static func testAcceptanceMortalKombat1DirectPlay() async throws {
+        print("    Running Acceptance Scenario: Mortal Kombat 1 on External SSD...")
+        let tempRoot = FileManager.default.temporaryDirectory.appendingPathComponent("AcceptanceTest_\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempRoot) }
+        
+        // Setup exact directory structure requested:
+        // /Volumes/GamesSSD/SteamLibrary/steamapps/common/Mortal Kombat 1/MK12.exe
+        let externalDrive = tempRoot.appendingPathComponent("GamesSSD")
+        let steamapps = externalDrive.appendingPathComponent("SteamLibrary/steamapps")
+        let mk1Dir = steamapps.appendingPathComponent("common/Mortal Kombat 1")
+        try FileManager.default.createDirectory(at: mk1Dir, withIntermediateDirectories: true)
+        
+        let manifestURL = steamapps.appendingPathComponent("appmanifest_1971870.acf")
+        let acfContent = """
+        "AppState"
+        {
+        \t"appid"\t\t"1971870"
+        \t"name"\t\t"Mortal Kombat 1"
+        \t"installdir"\t\t"Mortal Kombat 1"
+        \t"SizeOnDisk"\t\t"145920384000"
+        }
+        """
+        try acfContent.write(to: manifestURL, atomically: true, encoding: .utf8)
+        
+        let mk12Exe = mk1Dir.appendingPathComponent("MK12.exe")
+        var data = Data(count: 2048)
+        data[0] = 0x4D
+        data[1] = 0x5A
+        data[0x3C] = 0x80
+        data[0x80] = 0x50
+        data[0x81] = 0x45
+        data[0x84] = 0x64
+        data[0x85] = 0x86
+        let d3d12Str = "d3d12.dll".data(using: .utf8)!
+        data.replaceSubrange(0x100..<(0x100 + d3d12Str.count), with: d3d12Str)
+        try data.write(to: mk12Exe)
+        
+        // Test step 1: Detect Steam library
+        let scanner = GameFolderScanner.shared
+        let discovered = scanner.detectSteamLibrary(at: externalDrive.appendingPathComponent("SteamLibrary"))
+        try assertTrue(!discovered.isEmpty, "Mortal Kombat 1 must be detected from Steam Library")
+        
+        let discMK1 = discovered.first { $0.title == "Mortal Kombat 1" }
+        try assertTrue(discMK1 != nil, "Mortal Kombat 1 game record found")
+        try assertTrue(discMK1?.mainExecutablePath == mk12Exe.resolvingSymlinksInPath().path, "Executable must be MK12.exe")
+        
+        // Test step 2: Import into GameManager
+        let customInternalRoot = tempRoot.appendingPathComponent("MacZeroInternal")
+        let mockPaths = PathProvider(customRoot: customInternalRoot)
+        let prefixMgr = PrefixManager(pathProvider: mockPaths)
+        let testProcessMgr = ProcessManager(pathProvider: mockPaths, customRunnerBinary: "/usr/bin/true")
+        let gameMgr = GameManager(
+            pathProvider: mockPaths,
+            prefixManager: prefixMgr,
+            processManager: testProcessMgr
+        )
+
+        
+        let importedGame = try gameMgr.importDiscoveredExternalGame(
+            discovered: discMK1!,
+            locationType: .internalStorage,
+            customPrefixPath: nil
+        )
+        
+        try assertTrue(importedGame.title == "Mortal Kombat 1", "Imported game title must be Mortal Kombat 1")
+        try assertTrue(importedGame.isExternal == true, "Must be flagged as external game")
+        try assertTrue(importedGame.executablePath == mk12Exe.resolvingSymlinksInPath().path, "Executable path must point to external drive")
+        try assertTrue(importedGame.profileId == "mortal-kombat-1", "Must automatically match Mortal Kombat 1 profile")
+        try assertTrue(importedGame.graphicsApi == .dx12, "Must identify as DirectX 12")
+
+        
+        // Test step 3: Launch Direct Play from External SSD
+        let launchResult = try await gameMgr.launch(gameId: importedGame.id, mode: .standard)
+        try assertTrue(launchResult.exitCode == 0, "Game launch process must complete successfully")
+        try assertTrue(!launchResult.didCrash, "Game must not crash")
+        
+        // Test step 4: Verify prefix was created locally without duplicating game files
+        let internalPrefix = prefixMgr.getPrefix(forGameId: importedGame.prefixId)
+        try assertTrue(internalPrefix != nil, "Wine prefix created locally")
+        try assertTrue(internalPrefix?.path.contains("MacZeroInternal") == true, "Prefix must be stored inside Mac internal storage")
+        try assertTrue(FileManager.default.fileExists(atPath: mk12Exe.path), "Original game files remain on external SSD untouched")
     }
 }

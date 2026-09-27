@@ -26,6 +26,11 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
     private let dx12Optimizer: DX12Optimizer
     private let loggingService: LoggingService
     private let pathProvider: PathProvider
+    private let pathResolver: ExternalGamePathResolverProtocol
+    private let bookmarkManager: SecurityScopedBookmarkManagerProtocol
+    private let customRunnerBinary: String?
+
+
     
     public init(
         runtimeManager: RuntimeManagerProtocol = RuntimeManager.shared,
@@ -34,7 +39,10 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
         hardwareDetector: HardwareDetector = .shared,
         dx12Optimizer: DX12Optimizer = .shared,
         loggingService: LoggingService = .shared,
-        pathProvider: PathProvider = .shared
+        pathProvider: PathProvider = .shared,
+        pathResolver: ExternalGamePathResolverProtocol = ExternalGamePathResolver.shared,
+        bookmarkManager: SecurityScopedBookmarkManagerProtocol = SecurityScopedBookmarkManager.shared,
+        customRunnerBinary: String? = nil
     ) {
         self.runtimeManager = runtimeManager
         self.prefixManager = prefixManager
@@ -43,29 +51,46 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
         self.dx12Optimizer = dx12Optimizer
         self.loggingService = loggingService
         self.pathProvider = pathProvider
+        self.pathResolver = pathResolver
+        self.bookmarkManager = bookmarkManager
+        self.customRunnerBinary = customRunnerBinary
     }
     
     public func launchGame(
+
         game: Game,
         mode: GameLaunchMode = .standard,
         onOutput: (@Sendable (String) -> Void)? = nil
     ) async throws -> ProcessLaunchResult {
         loggingService.log("Initiating launch sequence for '\(game.title)' [Mode: \(mode.rawValue)]", level: .info, category: "Launcher", gameId: game.id)
         
-        // 1. Ensure Prefix Exists
-        var prefix = prefixManager.getPrefix(forGameId: game.prefixId)
+        // 1. Resolve Game Executable and External Drive Access
+        let resolved = try pathResolver.resolveGamePath(game: game)
+        loggingService.log("Resolved executable: \(resolved.executableURL.path) on volume '\(resolved.volumeName)'", level: .info, category: "Launcher", gameId: game.id)
+        
+        if let secURL = resolved.securityScopedURL {
+            _ = bookmarkManager.startAccessing(url: secURL)
+        }
+        
+        // 2. Ensure Prefix Exists (Internal or External)
+        var prefix = prefixManager.getPrefix(forGameId: game.prefixId, customPath: game.externalPrefixPath)
         if prefix == nil {
             loggingService.log("Initializing dedicated Wine prefix for '\(game.title)'...", level: .info, category: "Prefix", gameId: game.id)
-            prefix = try prefixManager.createPrefix(forGameId: game.prefixId, name: "\(game.title) Prefix")
+            prefix = try prefixManager.createPrefix(
+                forGameId: game.prefixId,
+                name: "\(game.title) Prefix",
+                architecture: game.architecture == .x86_32 ? "win32" : "win64",
+                customPath: game.externalPrefixPath
+            )
         }
         
         let prefixPath = prefix!.path
         
-        // 2. Resolve Profile & Optimization
-        let profile = profileEngine.profile(withId: game.profileId) ?? profileEngine.matchProfile(forTitle: game.title, executablePath: game.executablePath, api: game.graphicsApi)
+        // 3. Resolve Profile & Optimization
+        let profile = profileEngine.profile(withId: game.profileId) ?? profileEngine.matchProfile(forTitle: game.title, executablePath: resolved.executableURL.path, api: game.graphicsApi)
         let hardware = hardwareDetector.detect()
         
-        // 3. Prepare Environment
+        // 4. Prepare Environment
         var env = ProcessInfo.processInfo.environment
         env["WINEPREFIX"] = prefixPath
         env["WINEARCH"] = prefix!.wineArchitecture
@@ -112,13 +137,21 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
             env[k] = v
         }
         
-        // 4. Resolve Runtime Runner
-        let wineComponent = runtimeManager.defaultWineRuntime()
-        let wineBinary = wineComponent?.binaryPath ?? "/usr/bin/true"
+        // 5. Resolve Runtime Runner
+        let wineBinary: String
+        if let custom = customRunnerBinary {
+            wineBinary = custom
+        } else if let testRunner = ProcessInfo.processInfo.environment["MACZERO_TEST_RUNNER"] {
+            wineBinary = testRunner
+        } else {
+            let wineComponent = runtimeManager.defaultWineRuntime()
+            wineBinary = wineComponent?.binaryPath ?? "/usr/bin/true"
+        }
+
         
-        // 5. Build Arguments
+        // 6. Build Arguments
         var arguments: [String] = []
-        arguments.append(game.executablePath)
+        arguments.append(resolved.executableURL.path)
         if mode != .safeMode {
             arguments.append(contentsOf: profile.launchArguments)
             arguments.append(contentsOf: game.launchArguments)
@@ -126,17 +159,15 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
         
         loggingService.log("Runner binary: \(wineBinary)", level: .info, category: "Launcher", gameId: game.id)
         loggingService.log("Command arguments: \(arguments.joined(separator: " "))", level: .info, category: "Launcher", gameId: game.id)
+        loggingService.log("Working directory: \(resolved.workingDirectoryURL.path)", level: .info, category: "Launcher", gameId: game.id)
         
-        // 6. Launch Process
+        // 7. Launch Process
         let process = Process()
         process.executableURL = URL(fileURLWithPath: wineBinary)
         process.arguments = arguments
         process.environment = env
-        if let workDir = game.workingDirectory, FileManager.default.fileExists(atPath: workDir) {
-            process.currentDirectoryURL = URL(fileURLWithPath: workDir)
-        } else {
-            process.currentDirectoryURL = URL(fileURLWithPath: prefixPath)
-        }
+        process.currentDirectoryURL = resolved.workingDirectoryURL
+
         
         let pipe = Pipe()
         process.standardOutput = pipe

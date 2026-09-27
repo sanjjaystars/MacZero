@@ -12,6 +12,7 @@ struct MacZeroCLI {
         
         let command = args[1].lowercased()
         let gameManager = GameManager.shared
+        let driveManager = ExternalDriveManager.shared
         let runtimeManager = RuntimeManager.shared
         let prefixManager = PrefixManager.shared
         let diagnosticsService = DiagnosticsService.shared
@@ -26,10 +27,116 @@ struct MacZeroCLI {
             } else {
                 print("=== MacZero Library ===")
                 for g in games {
+                    let loc = g.isExternal ? "External: \(g.volumeName ?? "Drive")" : "Internal"
+                    let driveStatus = g.isExternal ? (g.isDriveConnected ? "🟢 Connected" : "⚠ Disconnected") : ""
                     print("• [\(g.id)] \(g.title)")
-                    print("  Status: \(g.compatibilityStatus.badgeText) | API: \(g.graphicsApi.rawValue) | Arch: \(g.architecture.rawValue)")
+                    print("  Status: \(g.compatibilityStatus.badgeText) | API: \(g.graphicsApi.rawValue) | Storage: \(loc) \(driveStatus)")
                     print("  Executable: \(g.executablePath)")
                 }
+            }
+            
+        case "drives":
+            let drives = driveManager.refreshDrives()
+            if drives.isEmpty {
+                print("No external drives detected.")
+            } else {
+                print("=== External Game Drives ===")
+                for d in drives {
+                    let status = d.isConnected ? "🟢 Connected" : "⚠ Disconnected"
+                    let ro = d.isReadOnly ? " [Read-Only]" : ""
+                    print("• \(d.name) (\(status)\(ro))")
+                    print("  Mount: \(d.mountPath)")
+                    print("  Filesystem: \(d.fileSystemType) | UUID: \(d.volumeUUID ?? "N/A")")
+                    print("  Capacity: \(d.formattedUsedCapacity) used / \(d.formattedTotalCapacity) total (\(d.formattedFreeCapacity) free)")
+                    if let bench = d.benchmark {
+                        print("  Performance: Read \(bench.formattedRead) | Write \(bench.formattedWrite)")
+                    }
+                }
+            }
+            
+        case "scan-drive":
+            guard args.count > 2 else {
+                print("Usage: maczero scan-drive <path-or-drive-id> [--deep]")
+                return
+            }
+            let target = args[2]
+            let isDeep = args.contains("--deep")
+            let depth: ScanDepth = isDeep ? .deep : .quick
+            
+            print("Scanning '\(target)' (\(depth.rawValue))...")
+            let results: [DiscoveredExternalGame]
+            if let drive = driveManager.getDrive(byId: target) {
+                results = gameManager.scanDrive(driveId: drive.id, depth: depth)
+            } else {
+                let url = URL(fileURLWithPath: target)
+                results = gameManager.scanExternalFolder(url: url, depth: depth)
+            }
+            
+            if results.isEmpty {
+                print("No Windows games or Steam libraries found at '\(target)'.")
+            } else {
+                print("Found \(results.count) game(s):")
+                for r in results {
+                    print("• \(r.title) [\(r.source.rawValue)]")
+                    print("  Executable: \(r.mainExecutablePath)")
+                    print("  API: \(r.graphicsApi.rawValue) | Architecture: \(r.architecture.rawValue)")
+                }
+            }
+            
+        case "import-steam":
+            guard args.count > 2 else {
+                print("Usage: maczero import-steam <path-to-steamlibrary-or-steamapps>")
+                return
+            }
+            let path = args[2]
+            let url = URL(fileURLWithPath: path)
+            print("Importing Steam library at '\(path)'...")
+            do {
+                let imported = try gameManager.importSteamLibrary(at: url, selectedAppIds: nil, locationType: .internalStorage)
+                print("✓ Successfully imported \(imported.count) Steam game(s):")
+                for g in imported {
+                    print("  • \(g.title) (AppID: \(g.sourceAppId ?? "N/A"))")
+                }
+            } catch {
+                print("Error importing Steam library: \(error.localizedDescription)")
+            }
+            
+        case "import-game":
+            guard args.count > 2 else {
+                print("Usage: maczero import-game <path-to-folder>")
+                return
+            }
+            let path = args[2]
+            let url = URL(fileURLWithPath: path)
+            print("Analyzing game folder at '\(path)'...")
+            if let discovered = GameFolderScanner.shared.analyzeGameFolder(at: url) {
+                do {
+                    let game = try gameManager.importDiscoveredExternalGame(discovered: discovered, locationType: .internalStorage, customPrefixPath: nil)
+                    print("✓ Successfully imported game:")
+                    print("  Title: \(game.title)")
+                    print("  Executable: \(game.executablePath)")
+                    print("  API: \(game.graphicsApi.rawValue)")
+                } catch {
+                    print("Error importing game: \(error.localizedDescription)")
+                }
+            } else {
+                print("No candidate Windows executable (.exe) found in folder.")
+            }
+            
+        case "bench":
+            guard args.count > 2 else {
+                print("Usage: maczero bench <drive-id>")
+                return
+            }
+            let driveId = args[2]
+            print("Benchmarking drive '\(driveId)'...")
+            do {
+                let result = try await driveManager.benchmarkDrive(id: driveId)
+                print("✓ Benchmark results for drive '\(driveId)':")
+                print("  Sequential Read:  \(result.formattedRead)")
+                print("  Sequential Write: \(result.formattedWrite)")
+            } catch {
+                print("Benchmark failed: \(error.localizedDescription)")
             }
             
         case "scan":
@@ -183,14 +290,19 @@ struct MacZeroCLI {
         Usage: maczero <command> [options]
         
         Commands:
-          list                          List all games in library
-          scan                          Scan Steam and standard directories for games
-          install <path-to-exe> [title] Add a Windows executable to the library
-          launch <game-id> [--safe-mode] Launch game in standard or safe mode
-          diagnose [game-id]            Run diagnostics on system, runtime & game
-          runtime list                  List discovered Wine, VKD3D, MoltenVK runtimes
-          prefix repair <game-id>       Repair game prefix
-          logs <game-id>                View execution logs for a game
+          list                                List all games in library
+          drives                              List all mounted & known external game drives
+          scan-drive <path-or-id> [--deep]   Scan external drive for games & Steam libraries
+          import-steam <path>                 Import external Steam library directly
+          import-game <path>                  Import external Windows game directory
+          bench <drive-id>                    Test drive read and write performance
+          scan                                Scan local Steam directories for games
+          install <path-to-exe> [title]       Add a Windows executable to the library
+          launch <game-id> [--safe-mode]      Launch game in standard or safe mode
+          diagnose [game-id]                  Run diagnostics on system, runtime & game
+          runtime list                        List discovered Wine, VKD3D, MoltenVK runtimes
+          prefix repair <game-id>             Repair game prefix
+          logs <game-id>                      View execution logs for a game
         """)
     }
 }

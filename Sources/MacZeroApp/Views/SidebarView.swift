@@ -27,6 +27,38 @@ struct SidebarView: View {
                 }
             }
             
+            Section("External Storage") {
+                Button(action: { viewModel.showGameDrivesSheet = true }) {
+                    HStack {
+                        Image(systemName: "externaldrive.fill")
+                            .frame(width: 20)
+                            .foregroundColor(.accentColor)
+                        Text("Game Drives")
+                        Spacer()
+                        Text("\(viewModel.drives.filter { $0.isConnected }.count)")
+                            .font(.system(size: 11, weight: .bold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(Color.green.opacity(0.2))
+                            .foregroundColor(.green)
+                            .cornerRadius(8)
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 4)
+                
+                Button(action: { viewModel.showExternalImportSheet = true }) {
+                    HStack {
+                        Image(systemName: "square.and.arrow.down.on.square")
+                            .frame(width: 20)
+                            .foregroundColor(.secondary)
+                        Text("Import External Library...")
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 4)
+            }
+            
             Section("System & Tools") {
                 Button(action: { viewModel.showRuntimeSheet = true }) {
                     HStack {
@@ -69,6 +101,10 @@ struct SidebarView: View {
         switch category {
         case .allGames:
             return viewModel.games.count
+        case .externalGames:
+            return viewModel.games.filter { $0.isExternal }.count
+        case .internalGames:
+            return viewModel.games.filter { !$0.isExternal }.count
         case .favorites:
             return viewModel.games.filter { $0.isFavorite }.count
         case .dx12Games:

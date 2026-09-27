@@ -10,18 +10,25 @@ MacZero is a graphical compatibility platform, game manager, and translation run
 
 ## Key Features
 
+- **External Game Drive & Direct Storage Play**: Run games directly from USB flash drives, external HDDs, and external SSDs (e.g. `/Volumes/GamesSSD/`) without copying hundreds of gigabytes of game assets to internal storage.
+- **Existing Steam Library Support**: Automatically detects and imports games from existing external Steam libraries (`SteamLibrary/steamapps/common/`), parsing `appmanifest_*.acf` files to extract titles, AppIDs, and executables.
+- **Persistent Security-Scoped Bookmarks**: Uses native macOS security-scoped bookmarks to retain persistent read/write access to external drives and game directories across application restarts.
+- **Drive Hot-Plugging & Disconnection Recovery**: Gracefully handles external drive disconnects without deleting games from your library; automatically re-attaches games with stable volume UUIDs when reconnected.
+- **Game Files vs Compatibility Prefix Isolation**: Game installations remain untouched on external storage, while Wine prefixes default to internal storage (`~/Library/Application Support/MacZero/prefixes/<game-id>`) with user-configurable external storage options.
+- **External Drive Manager & Speed Benchmark**: Inspects volume capacity, filesystem types (APFS, exFAT, NTFS), read-only warnings, and includes an optional sequential read/write speed test.
+- **Portable MacZero Library**: Option to export configuration and profiles directly onto external drives (`/Volumes/.../MacZero/`).
 - **DirectX 12 Focused Translation Pipeline**: Maps DirectX 12 calls via **VKD3D-Proton** → **Vulkan** → **MoltenVK** → **Metal 3** directly onto the Apple Silicon unified GPU.
 - **Legacy DirectX & Vulkan Support**: Automatic fallback and optimization for DirectX 11, 10, and 9 via **DXVK**, and native Vulkan mapping via **MoltenVK**.
-- **Isolated Game Prefix System**: Every game runs in a dedicated, sandboxed Wine prefix located in standard macOS directories (`~/Library/Application Support/MacZero/prefixes/<game-id>`), preventing cross-game configuration pollution and dependency conflicts.
+- **Isolated Game Prefix System**: Every game runs in a dedicated, sandboxed Wine prefix preventing cross-game configuration pollution and dependency conflicts.
 - **Automatic PE Binary Inspection**: Fast analysis of Windows `.exe` and `.msi` headers to detect architecture (x86_64, ARM64, 32-bit), graphics APIs (`d3d12`, `d3d11`, `d3d9`, `vulkan`), and kernel-level anti-cheat/DRM blockers.
 - **Honest Compatibility Engine**: Clear labeling of game compatibility:
   - 🟢 **Compatible**: Verified working with Wine/VKD3D/DXVK.
   - 🟡 **Experimental**: May require tweaks or have minor audio/visual issues.
   - 🔴 **Unsupported**: Relies on unsupported Windows NT kernel drivers (e.g., Vanguard, Ricochet, BattlEye kernel mode).
   - ⚪ **Unknown**: Not yet cataloged.
-- **Native macOS SwiftUI Interface**: Modern multi-pane UI featuring a Game Library grid, hero game cards, pipeline diagrams, one-click safe mode recovery, and live execution logging.
-- **Automated Steam Integration**: Discovers existing Steam libraries, identifies AppIDs, parses `libraryfolders.vdf`, and distinguishes native macOS ports from Windows `.exe` releases.
-- **Full CLI Support (`maczero`)**: Complete command-line automation for headless or power-user workflows (`list`, `scan`, `install`, `launch`, `diagnose`, `runtime`, `prefix`, `logs`).
+- **Native macOS SwiftUI Interface**: Modern multi-pane UI featuring a Game Library grid, Game Drive Manager, hero game cards, pipeline diagrams, one-click safe mode recovery, and live execution logging.
+- **Full CLI Support (`maczero`)**: Complete command-line automation for headless or power-user workflows (`list`, `drives`, `scan-drive`, `import-steam`, `import-game`, `bench`, `install`, `launch`, `diagnose`, `runtime`, `prefix`, `logs`).
+
 
 ---
 

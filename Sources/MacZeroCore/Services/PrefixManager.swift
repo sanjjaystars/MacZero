@@ -1,9 +1,9 @@
 import Foundation
 
 public protocol PrefixManagerProtocol: Sendable {
-    func getPrefix(forGameId gameId: String) -> GamePrefix?
+    func getPrefix(forGameId gameId: String, customPath: String?) -> GamePrefix?
     func listAllPrefixes() -> [GamePrefix]
-    func createPrefix(forGameId gameId: String, name: String, architecture: String) throws -> GamePrefix
+    func createPrefix(forGameId gameId: String, name: String, architecture: String, customPath: String?) throws -> GamePrefix
     func clonePrefix(sourceGameId: String, targetGameId: String, targetName: String) throws -> GamePrefix
     func backupPrefix(gameId: String, toDestination destinationURL: URL) throws -> URL
     func restorePrefix(fromArchive archiveURL: URL, forGameId gameId: String) throws -> GamePrefix
@@ -14,8 +14,12 @@ public protocol PrefixManagerProtocol: Sendable {
 }
 
 public extension PrefixManagerProtocol {
+    func getPrefix(forGameId gameId: String) -> GamePrefix? {
+        return getPrefix(forGameId: gameId, customPath: nil)
+    }
+    
     func createPrefix(forGameId gameId: String, name: String, architecture: String = "win64") throws -> GamePrefix {
-        return try createPrefix(forGameId: gameId, name: name, architecture: architecture)
+        return try createPrefix(forGameId: gameId, name: name, architecture: architecture, customPath: nil)
     }
 }
 
@@ -28,8 +32,14 @@ public final class PrefixManager: PrefixManagerProtocol, Sendable {
         self.pathProvider = pathProvider
     }
     
-    public func getPrefix(forGameId gameId: String) -> GamePrefix? {
-        let prefixURL = pathProvider.prefixPath(forGameId: gameId)
+    public func getPrefix(forGameId gameId: String, customPath: String? = nil) -> GamePrefix? {
+        let prefixURL: URL
+        if let custom = customPath, !custom.isEmpty {
+            prefixURL = URL(fileURLWithPath: custom)
+        } else {
+            prefixURL = pathProvider.prefixPath(forGameId: gameId)
+        }
+        
         let metadataURL = prefixURL.appendingPathComponent("maczero_prefix.json")
         
         if let data = try? Data(contentsOf: metadataURL),
@@ -55,10 +65,21 @@ public final class PrefixManager: PrefixManagerProtocol, Sendable {
         return items.compactMap { getPrefix(forGameId: $0) }
     }
     
-    public func createPrefix(forGameId gameId: String, name: String, architecture: String = "win64") throws -> GamePrefix {
-        try pathProvider.ensureDirectoriesExist()
-        let prefixURL = pathProvider.prefixPath(forGameId: gameId)
+    public func createPrefix(
+        forGameId gameId: String,
+        name: String,
+        architecture: String = "win64",
+        customPath: String? = nil
+    ) throws -> GamePrefix {
+        let prefixURL: URL
+        if let custom = customPath, !custom.isEmpty {
+            prefixURL = URL(fileURLWithPath: custom)
+        } else {
+            try pathProvider.ensureDirectoriesExist()
+            prefixURL = pathProvider.prefixPath(forGameId: gameId)
+        }
         let fileManager = FileManager.default
+
         
         if !fileManager.fileExists(atPath: prefixURL.path) {
             try fileManager.createDirectory(at: prefixURL, withIntermediateDirectories: true)

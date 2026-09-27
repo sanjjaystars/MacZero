@@ -65,6 +65,20 @@ struct GameCardView: View {
                             .foregroundColor(statusColor(game.compatibilityStatus))
                             .cornerRadius(4)
                         
+                        if game.isExternal {
+                            HStack(spacing: 2) {
+                                Image(systemName: "externaldrive.fill")
+                                    .font(.system(size: 8))
+                                Text(game.volumeName ?? "External")
+                                    .font(.system(size: 9, weight: .bold))
+                            }
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 2)
+                            .background(Color.purple.opacity(0.15))
+                            .foregroundColor(.purple)
+                            .cornerRadius(4)
+                        }
+                        
                         Text(game.graphicsApi.shortName)
                             .font(.system(size: 10, weight: .bold))
                             .padding(.horizontal, 5)
@@ -75,23 +89,31 @@ struct GameCardView: View {
                         
                         Spacer()
                     }
+                    
+                    if game.isExternal && !game.isDriveConnected {
+                        Text("⚠ Drive Disconnected")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundColor(.orange)
+                    }
                 }
                 
                 // Play Action Row
                 Button(action: onPlay) {
                     HStack {
-                        Image(systemName: "play.fill")
+                        Image(systemName: (!game.isExternal || game.isDriveConnected) ? "play.fill" : "exclamationmark.triangle")
                             .font(.system(size: 11))
-                        Text("PLAY")
+                        Text((game.isExternal && !game.isDriveConnected) ? "DISCONNECTED" : "PLAY")
                             .font(.system(size: 11, weight: .bold))
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 6)
-                    .background(Color.accentColor)
+                    .background((game.isExternal && !game.isDriveConnected) ? Color.gray.opacity(0.5) : Color.accentColor)
                     .foregroundColor(.white)
                     .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
+                .disabled(game.isExternal && !game.isDriveConnected)
+
             }
             .padding(10)
             .background(

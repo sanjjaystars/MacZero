@@ -6,6 +6,7 @@ import MacZeroCore
 @MainActor
 public final class LibraryViewModel: ObservableObject {
     @Published public var games: [Game] = []
+    @Published public var drives: [ExternalDrive] = []
     @Published public var selectedGameId: String? = nil
     @Published public var filterCategory: SidebarCategory = .allGames
     @Published public var searchText: String = ""
@@ -15,19 +16,27 @@ public final class LibraryViewModel: ObservableObject {
     @Published public var showDiagnosticsSheet: Bool = false
     @Published public var showRuntimeSheet: Bool = false
     @Published public var showLogsSheet: Bool = false
+    @Published public var showGameDrivesSheet: Bool = false
+    @Published public var showExternalImportSheet: Bool = false
     @Published public var lastLaunchError: String? = nil
     @Published public var lastLaunchResult: ProcessLaunchResult? = nil
     @Published public var showCrashAlert: Bool = false
+    @Published public var isBenchmarkingDrive: Bool = false
+    @Published public var driveBenchmarkMessage: String? = nil
     
     private let gameManager: GameManagerProtocol
+    private let driveManager: ExternalDriveManagerProtocol
     private let steamDetector: SteamDetector
     private let diagnosticsService: DiagnosticsServiceProtocol
+    private var driveObserverToken: UUID?
     
     public enum SidebarCategory: String, CaseIterable, Identifiable {
         case allGames = "All Games"
+        case externalGames = "External Drives"
+        case internalGames = "Internal SSD"
+        case steamGames = "Steam Libraries"
         case favorites = "Favorites"
         case dx12Games = "DirectX 12"
-        case steamGames = "Steam"
         case customGames = "Custom Windows .exe"
         
         public var id: String { rawValue }
@@ -35,9 +44,11 @@ public final class LibraryViewModel: ObservableObject {
         public var systemImage: String {
             switch self {
             case .allGames: return "gamecontroller.fill"
+            case .externalGames: return "externaldrive.fill"
+            case .internalGames: return "internaldrive.fill"
+            case .steamGames: return "cloud.fill"
             case .favorites: return "star.fill"
             case .dx12Games: return "bolt.fill"
-            case .steamGames: return "cloud.fill"
             case .customGames: return "terminal.fill"
             }
         }
@@ -45,15 +56,33 @@ public final class LibraryViewModel: ObservableObject {
     
     public init(
         gameManager: GameManagerProtocol = GameManager.shared,
+        driveManager: ExternalDriveManagerProtocol = ExternalDriveManager.shared,
         steamDetector: SteamDetector = .shared,
         diagnosticsService: DiagnosticsServiceProtocol = DiagnosticsService.shared
     ) {
         self.gameManager = gameManager
+        self.driveManager = driveManager
         self.steamDetector = steamDetector
         self.diagnosticsService = diagnosticsService
+        
         self.refreshGames()
+        self.refreshDrives()
+        
         if self.selectedGameId == nil, let first = games.first {
             self.selectedGameId = first.id
+        }
+        
+        self.driveObserverToken = driveManager.registerDriveChangeObserver { [weak self] updatedDrives in
+            Task { @MainActor in
+                self?.drives = updatedDrives
+                self?.refreshGames()
+            }
+        }
+    }
+    
+    deinit {
+        if let token = driveObserverToken {
+            driveManager.unregisterDriveChangeObserver(id: token)
         }
     }
     
@@ -63,12 +92,16 @@ public final class LibraryViewModel: ObservableObject {
             switch filterCategory {
             case .allGames:
                 matchesCategory = true
+            case .externalGames:
+                matchesCategory = game.isExternal
+            case .internalGames:
+                matchesCategory = !game.isExternal
+            case .steamGames:
+                matchesCategory = game.source == .steam
             case .favorites:
                 matchesCategory = game.isFavorite
             case .dx12Games:
                 matchesCategory = game.graphicsApi == .dx12
-            case .steamGames:
-                matchesCategory = game.source == .steam
             case .customGames:
                 matchesCategory = game.source == .customExe || game.source == .folder
             }
@@ -78,7 +111,8 @@ public final class LibraryViewModel: ObservableObject {
             if !searchText.isEmpty {
                 let query = searchText.lowercased()
                 return game.title.lowercased().contains(query) ||
-                       game.graphicsApi.rawValue.lowercased().contains(query)
+                       game.graphicsApi.rawValue.lowercased().contains(query) ||
+                       (game.volumeName?.lowercased().contains(query) ?? false)
             }
             return true
         }
@@ -91,6 +125,10 @@ public final class LibraryViewModel: ObservableObject {
     
     public func refreshGames() {
         self.games = gameManager.listGames()
+    }
+    
+    public func refreshDrives() {
+        self.drives = driveManager.refreshDrives()
     }
     
     public func selectGame(id: String) {
@@ -106,6 +144,14 @@ public final class LibraryViewModel: ObservableObject {
     
     public func launchSelectedGame(mode: GameLaunchMode = .standard) {
         guard let game = selectedGame else { return }
+        
+        // Check drive connection
+        if game.isExternal && !game.isDriveConnected {
+            self.lastLaunchError = "External game drive '\(game.volumeName ?? "Drive")' is disconnected. Please connect the drive to launch."
+            self.showCrashAlert = true
+            return
+        }
+        
         isLaunching = true
         lastLaunchError = nil
         lastLaunchResult = nil
@@ -142,5 +188,26 @@ public final class LibraryViewModel: ObservableObject {
         if let first = games.first {
             self.selectedGameId = first.id
         }
+    }
+    
+    public func benchmarkDrive(id: String) {
+        isBenchmarkingDrive = true
+        driveBenchmarkMessage = "Measuring drive read and write performance..."
+        Task {
+            do {
+                let res = try await driveManager.benchmarkDrive(id: id)
+                self.isBenchmarkingDrive = false
+                self.driveBenchmarkMessage = "Benchmark complete! Read: \(res.formattedRead) | Write: \(res.formattedWrite)"
+                self.refreshDrives()
+            } catch {
+                self.isBenchmarkingDrive = false
+                self.driveBenchmarkMessage = "Benchmark failed: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    public func removeDrive(id: String) {
+        driveManager.removeDrive(id: id)
+        refreshDrives()
     }
 }

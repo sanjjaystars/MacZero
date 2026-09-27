@@ -21,6 +21,12 @@ final class SettingsViewModel: ObservableObject {
     @Published var autoCheckProfileUpdates: Bool {
         didSet { UserDefaults.standard.set(autoCheckProfileUpdates, forKey: "autoCheckProfileUpdates") }
     }
+    @Published var defaultPrefixLocation: PrefixLocationType {
+        didSet { UserDefaults.standard.set(defaultPrefixLocation.rawValue, forKey: "defaultPrefixLocation") }
+    }
+    @Published var customPrefixRootPath: String {
+        didSet { UserDefaults.standard.set(customPrefixRootPath, forKey: "customPrefixRootPath") }
+    }
     
     init() {
         let def = UserDefaults.standard
@@ -30,6 +36,10 @@ final class SettingsViewModel: ObservableObject {
         self.enableMetalFx = def.bool(forKey: "enableMetalFx")
         self.hudOverlayEnabled = def.bool(forKey: "hudOverlayEnabled")
         self.autoCheckProfileUpdates = def.object(forKey: "autoCheckProfileUpdates") as? Bool ?? true
+        
+        let storedLoc = def.string(forKey: "defaultPrefixLocation") ?? PrefixLocationType.internalStorage.rawValue
+        self.defaultPrefixLocation = PrefixLocationType(rawValue: storedLoc) ?? .internalStorage
+        self.customPrefixRootPath = def.string(forKey: "customPrefixRootPath") ?? ""
     }
 }
 
@@ -38,6 +48,23 @@ struct SettingsView: View {
     
     var body: some View {
         Form {
+            Section("Compatibility Data Location (Wine Prefix)") {
+                Picker("Prefix Storage Location", selection: $vm.defaultPrefixLocation) {
+                    Text("Mac Internal Storage (Recommended)").tag(PrefixLocationType.internalStorage)
+                    Text("Same External Drive").tag(PrefixLocationType.externalDrive)
+                    Text("Custom Location").tag(PrefixLocationType.custom)
+                }
+                
+                if vm.defaultPrefixLocation == .externalDrive {
+                    Text("⚠ Storing Wine prefixes on an external drive requires a writable filesystem (APFS or exFAT). Performance depends on drive read/write speed.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.orange)
+                } else if vm.defaultPrefixLocation == .custom {
+                    TextField("Custom prefix directory path", text: $vm.customPrefixRootPath)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            
             Section("Graphics & DirectX 12 Translation") {
                 Toggle("VKD3D Shader Cache (Apple Silicon Unified Memory)", isOn: $vm.enableDX12ShaderCache)
                 Toggle("Enable Apple MetalFX Upscaling Where Supported", isOn: $vm.enableMetalFx)
@@ -58,7 +85,7 @@ struct SettingsView: View {
                     Text(PathProvider.shared.rootDirectory.path)
                         .font(.system(size: 11, design: .monospaced))
                 }
-                LabeledContent("Isolated Game Prefixes") {
+                LabeledContent("Internal Game Prefixes") {
                     Text(PathProvider.shared.prefixesDirectory.path)
                         .font(.system(size: 11, design: .monospaced))
                 }
@@ -69,6 +96,6 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 520, height: 420)
+        .frame(width: 540, height: 480)
     }
 }

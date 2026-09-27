@@ -71,6 +71,18 @@ public enum GameLaunchMode: String, Codable, Sendable {
     case diagnostics = "Diagnostics Only"
 }
 
+public enum LaunchMode: String, Codable, CaseIterable, Sendable {
+    case directExecutable = "Direct Executable"
+    case steam = "Steam Client"
+    case launcher = "Game Launcher"
+}
+
+public enum PrefixLocationType: String, Codable, CaseIterable, Sendable {
+    case internalStorage = "Mac Internal Storage"
+    case externalDrive = "Same External Drive"
+    case custom = "Custom Location"
+}
+
 public struct Game: Identifiable, Codable, Equatable, Hashable, Sendable {
     public let id: String
     public var title: String
@@ -96,6 +108,19 @@ public struct Game: Identifiable, Codable, Equatable, Hashable, Sendable {
     public var createdAt: Date
     public var updatedAt: Date
     
+    // External Game Drive & Steam Library Properties
+    public var driveIdentifier: String?
+    public var volumeName: String?
+    public var volumeUUID: String?
+    public var relativePath: String?
+    public var steamLibraryPath: String?
+    public var isExternal: Bool
+    public var isDriveConnected: Bool
+    public var securityBookmarkData: Data?
+    public var launchMode: LaunchMode
+    public var prefixLocationType: PrefixLocationType
+    public var externalPrefixPath: String?
+    
     public init(
         id: String = UUID().uuidString,
         title: String,
@@ -119,7 +144,18 @@ public struct Game: Identifiable, Codable, Equatable, Hashable, Sendable {
         iconPath: String? = nil,
         notes: String? = nil,
         createdAt: Date = Date(),
-        updatedAt: Date = Date()
+        updatedAt: Date = Date(),
+        driveIdentifier: String? = nil,
+        volumeName: String? = nil,
+        volumeUUID: String? = nil,
+        relativePath: String? = nil,
+        steamLibraryPath: String? = nil,
+        isExternal: Bool = false,
+        isDriveConnected: Bool = true,
+        securityBookmarkData: Data? = nil,
+        launchMode: LaunchMode = .directExecutable,
+        prefixLocationType: PrefixLocationType = .internalStorage,
+        externalPrefixPath: String? = nil
     ) {
         self.id = id
         self.title = title
@@ -144,5 +180,17 @@ public struct Game: Identifiable, Codable, Equatable, Hashable, Sendable {
         self.notes = notes
         self.createdAt = createdAt
         self.updatedAt = updatedAt
+        self.driveIdentifier = driveIdentifier
+        self.volumeName = volumeName
+        self.volumeUUID = volumeUUID
+        self.relativePath = relativePath
+        self.steamLibraryPath = steamLibraryPath
+        self.isExternal = isExternal
+        self.isDriveConnected = isDriveConnected
+        self.securityBookmarkData = securityBookmarkData
+        self.launchMode = launchMode
+        self.prefixLocationType = prefixLocationType
+        self.externalPrefixPath = externalPrefixPath
     }
 }
+

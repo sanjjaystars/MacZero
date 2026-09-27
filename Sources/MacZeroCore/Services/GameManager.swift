@@ -5,10 +5,24 @@ public protocol GameManagerProtocol: Sendable {
     func getGame(byId id: String) -> Game?
     func addGameFromExecutable(path: String, customTitle: String?, source: GameSource) throws -> Game
     func importSteamGame(discovered: DiscoveredSteamGame) throws -> Game
+    func importDiscoveredExternalGame(
+        discovered: DiscoveredExternalGame,
+        locationType: PrefixLocationType,
+        customPrefixPath: String?
+    ) throws -> Game
+    func importSteamLibrary(
+        at url: URL,
+        selectedAppIds: [String]?,
+        locationType: PrefixLocationType
+    ) throws -> [Game]
+    func scanDrive(driveId: String, depth: ScanDepth) -> [DiscoveredExternalGame]
+    func scanExternalFolder(url: URL, depth: ScanDepth) -> [DiscoveredExternalGame]
     func updateGame(_ game: Game) throws
     func removeGame(byId id: String, deletePrefix: Bool) throws
     func launch(gameId: String, mode: GameLaunchMode) async throws -> ProcessLaunchResult
     func repairGame(gameId: String) throws
+    func checkDriveConnectivity()
+    func exportPortableLibrary(toDrive driveId: String) throws -> URL
 }
 
 public final class GameManager: GameManagerProtocol, @unchecked Sendable {
@@ -19,10 +33,14 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
     private let profileEngine: ProfileEngineProtocol
     private let prefixManager: PrefixManagerProtocol
     private let processManager: ProcessManagerProtocol
+    private let driveManager: ExternalDriveManagerProtocol
+    private let bookmarkManager: SecurityScopedBookmarkManagerProtocol
+    private let scanner: GameFolderScannerProtocol
     private let loggingService: LoggingService
     
     private var gamesCache: [Game] = []
     private let queue = DispatchQueue(label: "com.maczero.gamemanager")
+    private var driveObserverToken: UUID?
     
     public init(
         pathProvider: PathProvider = .shared,
@@ -30,6 +48,9 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
         profileEngine: ProfileEngineProtocol = ProfileEngine.shared,
         prefixManager: PrefixManagerProtocol = PrefixManager.shared,
         processManager: ProcessManagerProtocol = ProcessManager.shared,
+        driveManager: ExternalDriveManagerProtocol = ExternalDriveManager.shared,
+        bookmarkManager: SecurityScopedBookmarkManagerProtocol = SecurityScopedBookmarkManager.shared,
+        scanner: GameFolderScannerProtocol = GameFolderScanner.shared,
         loggingService: LoggingService = .shared
     ) {
         self.pathProvider = pathProvider
@@ -37,9 +58,20 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
         self.profileEngine = profileEngine
         self.prefixManager = prefixManager
         self.processManager = processManager
+        self.driveManager = driveManager
+        self.bookmarkManager = bookmarkManager
+        self.scanner = scanner
         self.loggingService = loggingService
         
         loadGamesFromDisk()
+        checkDriveConnectivity()
+        setupDriveObserver()
+    }
+    
+    deinit {
+        if let token = driveObserverToken {
+            driveManager.unregisterDriveChangeObserver(id: token)
+        }
     }
     
     public func listGames() -> [Game] {
@@ -64,9 +96,19 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
         // 2. Resolve Profile
         let profile = profileEngine.matchProfile(forTitle: sanitizedTitle, executablePath: path, api: analysis.primaryApi)
         
+        // Check if on external drive
+        let matchedDrive = driveManager.getDrive(forPath: path)
+        let isExternal = matchedDrive != nil || path.hasPrefix("/Volumes/")
+        let bookmarkData = isExternal ? try? bookmarkManager.createBookmark(for: fileURL, id: nil) : nil
+        
         // 3. Create isolated prefix
         let gameId = UUID().uuidString
-        _ = try prefixManager.createPrefix(forGameId: gameId, name: "\(sanitizedTitle) Prefix", architecture: analysis.architecture == .x86_32 ? "win32" : "win64")
+        _ = try prefixManager.createPrefix(
+            forGameId: gameId,
+            name: "\(sanitizedTitle) Prefix",
+            architecture: analysis.architecture == .x86_32 ? "win32" : "win64",
+            customPath: nil
+        )
         
         // 4. Construct Game
         let game = Game(
@@ -84,7 +126,15 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
             runtimeId: "wine-default",
             profileId: profile.id,
             launchArguments: profile.launchArguments,
-            environmentVariables: [:]
+            environmentVariables: [:],
+            driveIdentifier: matchedDrive?.id,
+            volumeName: matchedDrive?.name,
+            volumeUUID: matchedDrive?.volumeUUID,
+            isExternal: isExternal,
+            isDriveConnected: matchedDrive?.isConnected ?? true,
+            securityBookmarkData: bookmarkData,
+            launchMode: .directExecutable,
+            prefixLocationType: .internalStorage
         )
         
         try saveGame(game)
@@ -99,13 +149,16 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
         
         let gameId = "steam-\(discovered.appId)"
         
-        // If already registered, return existing
         if let existing = getGame(byId: gameId) {
             return existing
         }
         
         let analysis = binaryInspector.inspect(executablePath: exePath)
         let profile = profileEngine.matchProfile(forTitle: discovered.name, executablePath: exePath, api: analysis.primaryApi)
+        
+        let matchedDrive = driveManager.getDrive(forPath: exePath)
+        let isExternal = matchedDrive != nil || exePath.hasPrefix("/Volumes/")
+        let bookmarkData = isExternal ? try? bookmarkManager.createBookmark(for: URL(fileURLWithPath: exePath), id: nil) : nil
         
         _ = try prefixManager.createPrefix(forGameId: gameId, name: "\(discovered.name) Prefix")
         
@@ -122,11 +175,118 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
             compatibilityReason: analysis.compatibilityReason,
             prefixId: gameId,
             profileId: profile.id,
-            launchArguments: profile.launchArguments
+            launchArguments: profile.launchArguments,
+            driveIdentifier: matchedDrive?.id,
+            volumeName: matchedDrive?.name,
+            volumeUUID: matchedDrive?.volumeUUID,
+            isExternal: isExternal,
+            isDriveConnected: matchedDrive?.isConnected ?? true,
+            securityBookmarkData: bookmarkData,
+            launchMode: .directExecutable,
+            prefixLocationType: .internalStorage
         )
         
         try saveGame(game)
         return game
+    }
+    
+    public func importDiscoveredExternalGame(
+        discovered: DiscoveredExternalGame,
+        locationType: PrefixLocationType = .internalStorage,
+        customPrefixPath: String? = nil
+    ) throws -> Game {
+        // If already imported with same executable, return existing
+        if let existing = listGames().first(where: { $0.executablePath == discovered.mainExecutablePath }) {
+            return existing
+        }
+        
+        let gameId = discovered.steamAppId != nil ? "steam-\(discovered.steamAppId!)" : UUID().uuidString
+        let profile = profileEngine.matchProfile(forTitle: discovered.title, executablePath: discovered.mainExecutablePath, api: discovered.graphicsApi)
+        
+        let exeURL = URL(fileURLWithPath: discovered.mainExecutablePath)
+        let bookmarkData = try? bookmarkManager.createBookmark(for: exeURL, id: gameId)
+        
+        // Setup prefix location
+        var targetPrefixPath: String? = nil
+        if locationType == .externalDrive {
+            if let drive = driveManager.getDrive(forPath: discovered.mainExecutablePath) {
+                targetPrefixPath = URL(fileURLWithPath: drive.mountPath)
+                    .appendingPathComponent("MacZero/Prefixes/\(gameId)").path
+            }
+        } else if locationType == .custom, let custom = customPrefixPath {
+            targetPrefixPath = custom
+        }
+        
+        _ = try prefixManager.createPrefix(
+            forGameId: gameId,
+            name: "\(discovered.title) Prefix",
+            architecture: discovered.architecture == .x86_32 ? "win32" : "win64",
+            customPath: targetPrefixPath
+        )
+        
+        let game = Game(
+            id: gameId,
+            title: discovered.title,
+            executablePath: discovered.mainExecutablePath,
+            workingDirectory: (discovered.mainExecutablePath as NSString).deletingLastPathComponent,
+            source: discovered.source,
+            sourceAppId: discovered.steamAppId,
+            graphicsApi: discovered.graphicsApi,
+            architecture: discovered.architecture,
+            compatibilityStatus: discovered.compatibilityStatus,
+            compatibilityReason: discovered.compatibilityReason,
+            prefixId: gameId,
+            profileId: profile.id,
+            launchArguments: profile.launchArguments,
+            driveIdentifier: discovered.volumeUUID,
+            volumeName: discovered.volumeName,
+            volumeUUID: discovered.volumeUUID,
+            relativePath: discovered.relativePath,
+            steamLibraryPath: discovered.source == .steam ? discovered.installDirectory : nil,
+            isExternal: true,
+            isDriveConnected: true,
+            securityBookmarkData: bookmarkData,
+            launchMode: .directExecutable,
+            prefixLocationType: locationType,
+            externalPrefixPath: targetPrefixPath
+        )
+        
+        try saveGame(game)
+        loggingService.log("Imported external game: '\(game.title)' [Source: \(game.source.rawValue)]", level: .info, category: "GameManager", gameId: game.id)
+        return game
+    }
+    
+    public func importSteamLibrary(
+        at url: URL,
+        selectedAppIds: [String]? = nil,
+        locationType: PrefixLocationType = .internalStorage
+    ) throws -> [Game] {
+        let discovered = scanner.detectSteamLibrary(at: url)
+        guard !discovered.isEmpty else {
+            throw NSError(domain: "GameManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "No Steam games found in library at: \(url.path)"])
+        }
+        
+        var importedGames: [Game] = []
+        for disc in discovered {
+            if let selected = selectedAppIds, let appId = disc.steamAppId, !selected.contains(appId) {
+                continue
+            }
+            let game = try importDiscoveredExternalGame(discovered: disc, locationType: locationType, customPrefixPath: nil)
+            importedGames.append(game)
+        }
+        
+        loggingService.log("Imported \(importedGames.count) games from Steam library at \(url.path)", level: .info, category: "GameManager")
+        return importedGames
+    }
+    
+    public func scanDrive(driveId: String, depth: ScanDepth = .quick) -> [DiscoveredExternalGame] {
+        guard let drive = driveManager.getDrive(byId: driveId) else { return [] }
+        let driveURL = URL(fileURLWithPath: drive.mountPath)
+        return scanExternalFolder(url: driveURL, depth: depth)
+    }
+    
+    public func scanExternalFolder(url: URL, depth: ScanDepth = .quick) -> [DiscoveredExternalGame] {
+        return scanner.scan(url: url, depth: depth, onProgress: nil)
     }
     
     public func updateGame(_ game: Game) throws {
@@ -165,6 +325,64 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
         _ = try prefixManager.repairPrefix(gameId: game.prefixId)
     }
     
+    public func checkDriveConnectivity() {
+        let connectedDrives = driveManager.listDrives()
+        let connectedUUIDs = Set(connectedDrives.filter { $0.isConnected }.compactMap { $0.volumeUUID })
+        let connectedNames = Set(connectedDrives.filter { $0.isConnected }.map { $0.name })
+        
+        queue.sync {
+            var updated = false
+            for i in 0..<gamesCache.count {
+                var g = gamesCache[i]
+                if g.isExternal {
+                    let isConn: Bool
+                    if let uuid = g.volumeUUID {
+                        isConn = connectedUUIDs.contains(uuid)
+                    } else if let vol = g.volumeName {
+                        isConn = connectedNames.contains(vol) || FileManager.default.fileExists(atPath: "/Volumes/\(vol)")
+                    } else {
+                        isConn = FileManager.default.fileExists(atPath: g.executablePath)
+                    }
+                    if g.isDriveConnected != isConn {
+                        g.isDriveConnected = isConn
+                        gamesCache[i] = g
+                        updated = true
+                    }
+                }
+            }
+            if updated {
+                try? persistGamesToDisk()
+            }
+        }
+    }
+    
+    public func exportPortableLibrary(toDrive driveId: String) throws -> URL {
+        guard let drive = driveManager.getDrive(byId: driveId) else {
+            throw NSError(domain: "GameManager", code: 404, userInfo: [NSLocalizedDescriptionKey: "Drive not found: \(driveId)"])
+        }
+        
+        let portableDir = URL(fileURLWithPath: drive.mountPath).appendingPathComponent("MacZero", isDirectory: true)
+        let fileManager = FileManager.default
+        try fileManager.createDirectory(at: portableDir, withIntermediateDirectories: true)
+        
+        let externalGamesOnDrive = listGames().filter { $0.driveIdentifier == driveId || $0.volumeUUID == drive.volumeUUID }
+        let libraryFile = portableDir.appendingPathComponent("library.json")
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted]
+        let data = try encoder.encode(externalGamesOnDrive)
+        try data.write(to: libraryFile)
+        
+        loggingService.log("Exported portable library (\(externalGamesOnDrive.count) games) to: \(libraryFile.path)", level: .info, category: "Portable")
+        return libraryFile
+    }
+    
+    private func setupDriveObserver() {
+        driveObserverToken = driveManager.registerDriveChangeObserver { [weak self] drives in
+            guard let self = self else { return }
+            self.checkDriveConnectivity()
+        }
+    }
+    
     private func saveGame(_ game: Game) throws {
         try queue.sync {
             gamesCache.append(game)
@@ -176,7 +394,6 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
         let gamesFile = pathProvider.configDirectory.appendingPathComponent("games.json")
         guard let data = try? Data(contentsOf: gamesFile),
               let list = try? JSONDecoder().decode([Game].self, from: data) else {
-            // Seed sample target game Mortal Kombat 1 if library is completely empty
             seedInitialTargetGame()
             return
         }
@@ -193,12 +410,11 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
     }
     
     private func seedInitialTargetGame() {
-        // Pre-configure Mortal Kombat 1 as the first target game reference
         let mk1 = Game(
             id: "target-mortal-kombat-1",
             title: "Mortal Kombat 1",
-            executablePath: "/Users/Shared/Games/MortalKombat1/MK12.exe",
-            workingDirectory: "/Users/Shared/Games/MortalKombat1",
+            executablePath: "/Volumes/GamesSSD/SteamLibrary/steamapps/common/Mortal Kombat 1/MK12.exe",
+            workingDirectory: "/Volumes/GamesSSD/SteamLibrary/steamapps/common/Mortal Kombat 1",
             source: .steam,
             sourceAppId: "1971870",
             graphicsApi: .dx12,
@@ -210,7 +426,16 @@ public final class GameManager: GameManagerProtocol, @unchecked Sendable {
             profileId: "mortal-kombat-1",
             launchArguments: ["-dx12", "-novid"],
             isFavorite: true,
-            notes: "First milestone target game. Single-player and local fight modes run smoothly at 60 FPS."
+            notes: "Direct play from external game drive / Steam Library.",
+            driveIdentifier: "GamesSSD-UUID-001",
+            volumeName: "GamesSSD",
+            volumeUUID: "GamesSSD-UUID-001",
+            relativePath: "SteamLibrary/steamapps/common/Mortal Kombat 1/MK12.exe",
+            steamLibraryPath: "/Volumes/GamesSSD/SteamLibrary",
+            isExternal: true,
+            isDriveConnected: true,
+            launchMode: .directExecutable,
+            prefixLocationType: .internalStorage
         )
         self.gamesCache = [mk1]
         try? persistGamesToDisk()
