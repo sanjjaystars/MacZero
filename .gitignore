@@ -17,3 +17,5 @@ DerivedData/
 *.tar
 *.zip
 cache/
+*.app/
+*.app
