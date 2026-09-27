@@ -73,10 +73,23 @@ public final class DX12Optimizer: Sendable {
         env["WINE_LARGE_ADDRESS_AWARE"] = "1"
         
         // 4. Vulkan ICD discovery for MoltenVK
-        let homebrewIcd = "/opt/homebrew/share/vulkan/icd.d/MoltenVK_icd.json"
-        if FileManager.default.fileExists(atPath: homebrewIcd) {
-            env["VK_ICD_FILENAMES"] = homebrewIcd
+        let icdCandidates = [
+            "/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json",
+            "/opt/homebrew/share/vulkan/icd.d/MoltenVK_icd.json",
+            "/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json",
+            "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json"
+        ]
+        for candidate in icdCandidates {
+            if FileManager.default.fileExists(atPath: candidate) {
+                env["VK_ICD_FILENAMES"] = candidate
+                break
+            }
         }
+        
+        let existingDyld = env["DYLD_FALLBACK_LIBRARY_PATH"] ?? ""
+        let libPaths = ["/opt/homebrew/lib", "/usr/local/lib"]
+        let joinedLibs = libPaths.joined(separator: ":")
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = existingDyld.isEmpty ? joinedLibs : "\(existingDyld):\(joinedLibs)"
         
         return env
     }

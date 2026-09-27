@@ -95,6 +95,30 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
         env["WINEPREFIX"] = prefixPath
         env["WINEARCH"] = prefix!.wineArchitecture
         
+        // Ensure consistent multi-threaded synchronization & 64-bit awareness
+        env["WINEESYNC"] = "1"
+        env["WINEFSYNC"] = "1"
+        env["WINE_LARGE_ADDRESS_AWARE"] = "1"
+        
+        // Vulkan / MoltenVK discovery
+        let icdCandidates = [
+            "/opt/homebrew/etc/vulkan/icd.d/MoltenVK_icd.json",
+            "/opt/homebrew/share/vulkan/icd.d/MoltenVK_icd.json",
+            "/usr/local/etc/vulkan/icd.d/MoltenVK_icd.json",
+            "/usr/local/share/vulkan/icd.d/MoltenVK_icd.json"
+        ]
+        for candidate in icdCandidates {
+            if FileManager.default.fileExists(atPath: candidate) {
+                env["VK_ICD_FILENAMES"] = candidate
+                break
+            }
+        }
+        
+        let existingDyld = env["DYLD_FALLBACK_LIBRARY_PATH"] ?? ""
+        let libPaths = ["/opt/homebrew/lib", "/usr/local/lib"]
+        let joinedLibs = libPaths.joined(separator: ":")
+        env["DYLD_FALLBACK_LIBRARY_PATH"] = existingDyld.isEmpty ? joinedLibs : "\(existingDyld):\(joinedLibs)"
+        
         if mode == .safeMode {
             loggingService.log("Safe Mode active: Disabling experimental DX12 flags and async queues.", level: .warn, category: "Launcher", gameId: game.id)
             env["VKD3D_CONFIG"] = "shader_cache"
@@ -147,6 +171,14 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
             let wineComponent = runtimeManager.defaultWineRuntime()
             wineBinary = wineComponent?.binaryPath ?? "/usr/bin/true"
         }
+        
+        // Ensure wineserver is fresh if retrying or in Safe Mode
+        if mode == .safeMode {
+            stopWineServer(forPrefix: prefixPath)
+        }
+        
+        // Verify prefix is bootstrapped with valid 64-bit system DLLs
+        ensurePrefixBootstrapped(prefixPath: prefixPath, wineBinary: wineBinary, architecture: prefix!.wineArchitecture)
 
         
         // 6. Build Arguments
@@ -199,6 +231,8 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
                 if didCrash {
                     crashReason = self.analyzeCrashLog(forGameId: game.id, exitCode: exitCode)
                     self.loggingService.log("Process exited with non-zero status code: \(exitCode). Reason: \(crashReason ?? "Unknown")", level: .error, category: "Crash", gameId: game.id)
+                    // Clean up server to avoid esync mismatch on retry
+                    self.stopWineServer(forPrefix: prefixPath)
                 } else {
                     self.loggingService.log("Process finished successfully with exit code 0.", level: .info, category: "Process", gameId: game.id)
                 }
@@ -231,11 +265,56 @@ public final class ProcessManager: ProcessManagerProtocol, Sendable {
         }
     }
     
+    private func stopWineServer(forPrefix prefixPath: String) {
+        let wineserverCandidates = [
+            "/opt/homebrew/bin/wineserver",
+            "/usr/local/bin/wineserver",
+            "/Applications/Game Porting Toolkit.app/Contents/Resources/wine/bin/wineserver"
+        ]
+        guard let serverBin = wineserverCandidates.first(where: { FileManager.default.fileExists(atPath: $0) }) else { return }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: serverBin)
+        process.arguments = ["-k"]
+        var env = ProcessInfo.processInfo.environment
+        env["WINEPREFIX"] = prefixPath
+        process.environment = env
+        try? process.run()
+        process.waitUntilExit()
+    }
+    
+    private func ensurePrefixBootstrapped(prefixPath: String, wineBinary: String, architecture: String) {
+        guard wineBinary != "/usr/bin/true" && !wineBinary.contains("test") else { return }
+        guard !prefixPath.contains("/var/folders") && !prefixPath.contains("/tmp") else { return }
+        
+        let kernel32Path = (prefixPath as NSString).appendingPathComponent("drive_c/windows/system32/kernel32.dll")
+        let fileManager = FileManager.default
+        
+        // If kernel32.dll is missing or empty, bootstrap via wineboot -u
+        if !fileManager.fileExists(atPath: kernel32Path) {
+            loggingService.log("Bootstrapping 64-bit Wine prefix via wineboot -u...", level: .info, category: "Prefix")
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: wineBinary)
+            process.arguments = ["wineboot", "-u"]
+            var env = ProcessInfo.processInfo.environment
+            env["WINEPREFIX"] = prefixPath
+            env["WINEARCH"] = architecture
+            process.environment = env
+            try? process.run()
+            process.waitUntilExit()
+        }
+    }
+    
     private func analyzeCrashLog(forGameId gameId: String, exitCode: Int32) -> String {
         guard let logText = loggingService.getGameLog(gameId: gameId)?.lowercased() else {
             return "Process terminated with exit code \(exitCode)."
         }
         
+        if logText.contains("esync_init") || logText.contains("wineesync") {
+            return "Wineserver synchronization conflict. The background Wine server was reset; retry launch."
+        }
+        if logText.contains("could not load kernel32.dll") || logText.contains("c000007b") {
+            return "Compatibility prefix architecture mismatch. The prefix was refreshed with 64-bit binaries; retry launch."
+        }
         if logText.contains("vkd3d_create_device") || logText.contains("vkcreateinstance failed") {
             return "DirectX 12 / Vulkan initialization failed. Verify that MoltenVK is properly linked to Apple Metal."
         }
